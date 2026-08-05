@@ -110,6 +110,27 @@ navegador, podia deixar uma camada invisível cobrindo a tela e
 ocasionalmente atrapalhando cliques. Não era visível a olho nu, mas foi
 corrigido — mais uma vantagem de ter revisado o código a fundo.
 
+## 9. "Minhas obrigações" e cadastro em massa por CSV
+
+**Antes:** para saber "o que é meu", cada pessoa tinha que usar o filtro
+"Todos os responsáveis" toda vez que abria o painel. E cadastrar uma leva
+de obrigações novas (por exemplo, ao adicionar uma empresa nova) era
+clicar em "+ Nova obrigação" uma vez para cada item, manualmente.
+
+**Agora:**
+- Uma aba nova, **"Minhas obrigações"**, mostra de cara só o que está
+  vinculado à sua conta — sem precisar mexer em filtro nenhum.
+- O campo "Responsável", no cadastro de obrigação, passou a oferecer a
+  lista de contas da equipe (além da opção "Outro", para quem não usa o
+  sistema, como um contador terceirizado) — isso é o que torna "Minhas
+  obrigações" confiável, em vez de depender de bater um texto digitado.
+- Uma tela nova em Gerenciar → **Importar CSV** permite cadastrar várias
+  obrigações de uma vez, enviando uma planilha. O painel confere cada
+  linha antes de gravar qualquer coisa, mostra o que está pronto para
+  importar e o que tem erro (com o motivo), cria empresas novas
+  automaticamente e tenta vincular o responsável a alguém já cadastrado.
+  Só depois de você conferir e confirmar é que os dados entram no banco.
+
 ## O que continua exatamente igual
 
 - Visual do painel (cores, tipografia, layout dos cartões).

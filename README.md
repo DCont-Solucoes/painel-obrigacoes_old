@@ -17,21 +17,24 @@ painel-obrigacoes/
 │   ├── dateUtils.js         cálculo de ocorrências, prazos, status (puro, sem DOM)
 │   ├── state.js             estado em memória da sessão atual
 │   ├── data.js               ações de negócio (marcar concluído, salvar, excluir…)
+│   ├── csv.js                 leitura, validação e modelo do CSV de importação em massa
 │   ├── render.js             monta a tela e distribui os cliques (delegação de eventos)
 │   ├── app.js                 ponto de entrada: autenticação e boot
 │   ├── api/
 │   │   ├── auth.js           login/logout/perfil
-│   │   ├── obligations.js    CRUD de obrigações
+│   │   ├── obligations.js    CRUD de obrigações (inclui inserção em massa)
 │   │   ├── completions.js    marcar/desfazer conclusões
-│   │   └── companies.js      empresas
+│   │   ├── companies.js      empresas
+│   │   └── profiles.js       equipe (listar contas, alterar papel de acesso)
 │   └── ui/
 │       ├── login.js           tela de login
 │       ├── toolbar.js         abas + filtros
-│       ├── board.js           painel (cartões agrupados por status)
-│       ├── manage.js          aba "Gerenciar": orquestra as 3 sub-abas abaixo
+│       ├── board.js           painel (cartões agrupados por status; também usado pela aba "Minhas obrigações")
+│       ├── manage.js          aba "Gerenciar": orquestra as 4 sub-abas abaixo
 │       ├── manageObligations.js  sub-aba Obrigações (lista administrativa)
 │       ├── manageCompanies.js    sub-aba Empresas (cadastrar/renomear/excluir)
 │       ├── manageTeam.js         sub-aba Equipe (alternar papel admin/membro)
+│       ├── manageImport.js       sub-aba Importar CSV (cadastro em massa)
 │       ├── modal.js           formulário de nova/editar obrigação
 │       ├── toast.js           notificações não-bloqueantes (substitui alert())
 │       └── confirmDialog.js   diálogo de confirmação (substitui confirm())
@@ -79,7 +82,7 @@ inteiro" para conflitar.
 
 ## Telas de administração (aba "Gerenciar")
 
-Visível só para quem tem perfil `admin`. Tem três sub-abas:
+Visível só para quem tem perfil `admin`. Tem quatro sub-abas:
 
 - **Obrigações** — cadastrar, editar, excluir (o CRUD original).
 - **Empresas** — cadastrar, renomear, excluir. Ao excluir uma empresa que
@@ -93,6 +96,7 @@ Visível só para quem tem perfil `admin`. Tem três sub-abas:
   ficar exposta no navegador. A tela de Equipe só lê/atualiza a tabela
   `profiles`, que já é criada automaticamente pelo gatilho do banco quando
   a conta é criada.
+- **Importar CSV** — cadastro em massa (ver seção própria abaixo).
 
 Um administrador pode, inclusive, remover o próprio acesso de admin — a
 interface pede confirmação extra nesse caso (`data.js → doChangeRole`),
@@ -100,6 +104,53 @@ mas não bloqueia, para não deixar o sistema sem ninguém com esse poder em
 caso de erro deliberado. Se isso acontecer sem querer, outro admin resolve
 pela tela, ou, na ausência de qualquer admin, pelo SQL Editor do Supabase
 (`update profiles set role='admin' where email='...'`).
+
+## Responsável vinculado a uma conta (`responsible_id`)
+
+Cada obrigação tem dois campos relacionados: `responsible` (texto livre,
+sempre exibido nos cartões e na lista) e `responsible_id` (referência
+opcional para `profiles.id`). No formulário, o campo "Responsável" agora é
+um seletor com as contas da equipe, mais uma opção "Outro" que revela um
+campo de texto livre — para casos em que o responsável não é usuário do
+sistema (ex.: contador terceirizado). Quando alguém da equipe é escolhido,
+os dois campos ficam sempre sincronizados (`responsible` reflete o
+`display_name` do perfil escolhido); quando é "Outro", só o texto livre é
+gravado e `responsible_id` fica nulo.
+
+Esse vínculo é o que permite a aba **"Minhas obrigações"** filtrar de forma
+confiável (`ob.responsible_id === STATE.session.id`), em vez de depender de
+comparação de texto — que quebraria com qualquer diferença de acentuação,
+maiúsculas ou apelido. Obrigações cadastradas antes dessa mudança (ou
+importadas com um nome que não bate com nenhuma conta) continuam
+funcionando normalmente no restante do painel, só não aparecem em "Minhas
+obrigações" até alguém editar e vincular o responsável certo.
+
+## Importação em massa (CSV)
+
+Em Gerenciar → Importar CSV. Fluxo em duas etapas, pensado para nunca
+gravar dado inválido no banco:
+
+1. **Escolher arquivo** → `js/csv.js` lê o CSV (via PapaParse, carregado
+   por CDN em `index.html`) e valida cada linha localmente, no navegador,
+   sem tocar no banco ainda. O resultado (`STATE.importPreview`) mostra
+   quantas linhas estão prontas e quais têm erro, com o motivo específico
+   por linha (ex.: `"categoria inválida"`, `"dia inválido (1-31)"`).
+2. **Confirmar importação** → só as linhas válidas são enviadas. Para cada
+   uma: a empresa é criada se ainda não existir (`ensureCompany`, mesmo
+   mecanismo do formulário manual); o nome do responsável é comparado
+   (sem diferenciar maiúsculas/minúsculas) com `STATE.profiles` — se bater,
+   vincula por `responsible_id`; senão, fica como texto livre. Todas as
+   linhas são gravadas numa única chamada (`createObligationsBulk`), que é
+   tudo-ou-nada no banco — não existe risco de metade importar e metade
+   não por causa de uma falha de rede no meio do caminho.
+
+Colunas esperadas no CSV (cabeçalho em português, minúsculo — veja
+`CSV_COLUMNS` em `js/csv.js`): `nome, categoria, empresa, responsavel,
+frequencia, dia, mes, meses, data, observacoes`. `categoria` e
+`frequencia` usam as mesmas chaves internas do sistema (`federal`,
+`estadual`, `municipal`, `trabalhista`, `societaria` / `mensal`,
+`trimestral`, `anual`, `pontual`) — o botão "Baixar modelo CSV" na própria
+tela gera um arquivo de exemplo já no formato certo.
 
 ## Papéis de acesso (RLS)
 

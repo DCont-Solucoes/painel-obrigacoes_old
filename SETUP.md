@@ -43,7 +43,11 @@ da equipe pode marcar conclusões).
 > **Se precisar rodar este script de novo no mesmo projeto** (por exemplo,
 > para atualizar para uma versão mais nova do painel), pode colar e rodar
 > o arquivo inteiro de novo sem problema — o script foi escrito para ser
-> seguro nesse caso (não trava com erros de "já existe").
+> seguro nesse caso (não trava com erros de "já existe"). Isso também vale
+> quando uma nova versão do painel adiciona uma coluna nova a uma tabela
+> existente (por exemplo, a versão que vincula o campo "Responsável" a uma
+> conta da equipe) — rodar o script de novo só adiciona o que está
+> faltando, sem apagar nem alterar os dados que você já tem cadastrados.
 
 ## 3. Desligar o cadastro público
 
