@@ -1,28 +1,35 @@
-import { STATE, isAdmin } from './state.js';
-import { fetchObligations, createObligation, updateObligation, deleteObligation as apiDeleteObligation } from './api/obligations.js';
-import { fetchCompletions, markCompletion, deleteCompletion } from './api/completions.js';
+import { STATE, isAdmin, holidaysDateSet } from './state.js';
+import { fetchObligations, createObligation, updateObligation, deleteObligation as apiDeleteObligation, createObligationsBulk } from './api/obligations.js';
+import { fetchCompletions, markCompletion, deleteCompletion, updateCompletionAttachment } from './api/completions.js';
 import { fetchCompanies, ensureCompany, createCompany, updateCompany, deleteCompany as apiDeleteCompany } from './api/companies.js';
 import { fetchProfiles, updateProfile } from './api/profiles.js';
+import { fetchComments, createComment, deleteComment as apiDeleteComment } from './api/comments.js';
+import { fetchAuditLog } from './api/auditLog.js';
+import { fetchHolidays, createHoliday, deleteHoliday as apiDeleteHoliday, fetchNationalHolidays } from './api/holidays.js';
+import { uploadAttachment } from './api/storage.js';
+import { attachDialog } from './ui/attachDialog.js';
 import { getActiveOccurrence, fmtKey } from './dateUtils.js';
 import { showToast } from './ui/toast.js';
 import { confirmDialog } from './ui/confirmDialog.js';
 
-// Carrega as quatro tabelas em paralelo. Cada uma é independente — se uma
+// Carrega as cinco tabelas em paralelo. Cada uma é independente — se uma
 // falhar (ex.: sem conexão), as outras ainda tentam, e sinalizamos o erro
 // via STATE.connectionError para a interface mostrar o banner de aviso.
 export async function loadAll() {
   STATE.connectionError = null;
   try {
-    const [obligations, completions, companies, profiles] = await Promise.all([
+    const [obligations, completions, companies, profiles, holidays] = await Promise.all([
       fetchObligations(),
       fetchCompletions(),
       fetchCompanies(),
       fetchProfiles(),
+      fetchHolidays(),
     ]);
     STATE.obligations = obligations;
     STATE.completions = completions;
     STATE.companies = companies;
     STATE.profiles = profiles;
+    STATE.holidays = holidays;
   } catch (err) {
     console.error('Falha ao carregar dados do painel', err);
     STATE.connectionError = 'Não foi possível carregar os dados agora. Verifique sua conexão com a internet.';
@@ -50,11 +57,12 @@ export async function doMarkDone(obligationId, onDone) {
         return acc;
       }, new Map())
   );
-  const active = getActiveOccurrence(ob, completionsByObligation);
+  const active = getActiveOccurrence(ob, completionsByObligation, holidaysDateSet());
   if (!active) return;
 
+  let created = null;
   try {
-    const created = await markCompletion({
+    created = await markCompletion({
       obligationId,
       occurrenceDate: fmtKey(active),
       userId: STATE.session.id,
@@ -72,6 +80,24 @@ export async function doMarkDone(obligationId, onDone) {
     }
   } finally {
     onDone?.();
+  }
+
+  // Comprovante é opcional e não bloqueia o fluxo principal — a conclusão
+  // já está salva antes mesmo dessa pergunta aparecer.
+  if (created) {
+    const file = await attachDialog(ob.name);
+    if (file) {
+      try {
+        const path = await uploadAttachment(file, obligationId, created.id);
+        const updated = await updateCompletionAttachment(created.id, path);
+        STATE.completions = STATE.completions.map((c) => (c.id === created.id ? updated : c));
+        showToast('Comprovante anexado.', 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('A conclusão foi salva, mas não foi possível enviar o comprovante agora.', 'error');
+      }
+      onDone?.();
+    }
   }
 }
 
@@ -143,12 +169,15 @@ export async function doSaveObligation(id, formData, onDone) {
       category: formData.category,
       company_id: companyId,
       responsible: formData.responsible,
+      responsible_id: formData.responsible_id ?? null,
       frequency: formData.frequency,
       day_of_month: formData.day_of_month ?? null,
       month: formData.month ?? null,
       months: formData.months ?? null,
       due_date: formData.due_date ?? null,
       notes: formData.notes,
+      priority: formData.priority || 'media',
+      adjust_business_day: !!formData.adjust_business_day,
     };
 
     let saved;
@@ -253,5 +282,172 @@ export async function doChangeRole(profileId, newRole, onDone) {
     showToast('Não foi possível alterar o papel agora.', 'error');
   } finally {
     onDone?.();
+  }
+}
+
+// ---------- comentários ----------
+
+export async function doLoadComments(obligationId) {
+  try {
+    return await fetchComments(obligationId);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível carregar os comentários agora.', 'error');
+    return [];
+  }
+}
+
+export async function doAddComment(obligationId, body, onDone) {
+  const trimmed = (body || '').trim();
+  if (!trimmed) return;
+  try {
+    const created = await createComment({
+      obligationId,
+      authorId: STATE.session.id,
+      authorName: STATE.profile?.display_name || STATE.session.email,
+      body: trimmed,
+    });
+    onDone?.(created);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível salvar o comentário agora.', 'error');
+  }
+}
+
+export async function doDeleteComment(commentId, onDone) {
+  const ok = await confirmDialog({
+    title: 'Excluir comentário',
+    message: 'Excluir este comentário? Esta ação não pode ser desfeita.',
+    confirmLabel: 'Excluir',
+  });
+  if (!ok) return;
+  try {
+    await apiDeleteComment(commentId);
+    onDone?.();
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível excluir o comentário agora.', 'error');
+  }
+}
+
+// ---------- histórico / auditoria ----------
+
+export async function doLoadAuditLog(onDone) {
+  try {
+    const rows = await fetchAuditLog({ limit: 200 });
+    STATE.auditLog = rows;
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível carregar o histórico agora.', 'error');
+    STATE.auditLog = [];
+  } finally {
+    onDone?.();
+  }
+}
+
+// ---------- feriados ----------
+
+export async function doAddHoliday(date, name, onDone) {
+  if (!date || !name.trim()) { showToast('Informe a data e o nome do feriado.', 'error'); return; }
+  try {
+    const created = await createHoliday({ date, name: name.trim() });
+    STATE.holidays.push(created);
+    STATE.holidays.sort((a, b) => a.holiday_date.localeCompare(b.holiday_date));
+    showToast('Feriado cadastrado.', 'success');
+  } catch (err) {
+    console.error(err);
+    const msg = err.code === '23505' ? 'Já existe um feriado cadastrado nessa data.' : 'Não foi possível cadastrar o feriado agora.';
+    showToast(msg, 'error');
+  } finally {
+    onDone?.();
+  }
+}
+
+export async function doDeleteHoliday(id, onDone) {
+  try {
+    await apiDeleteHoliday(id);
+    STATE.holidays = STATE.holidays.filter((h) => h.id !== id);
+    showToast('Feriado removido.', 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível remover o feriado agora.', 'error');
+  } finally {
+    onDone?.();
+  }
+}
+
+export async function doImportNationalHolidays(year, onDone) {
+  try {
+    const list = await fetchNationalHolidays(year);
+    let added = 0;
+    for (const h of list) {
+      if (STATE.holidays.some((existing) => existing.holiday_date === h.date)) continue;
+      try {
+        const created = await createHoliday(h);
+        STATE.holidays.push(created);
+        added++;
+      } catch (err) {
+        if (err.code !== '23505') throw err; // ignora duplicidade, propaga outros erros
+      }
+    }
+    STATE.holidays.sort((a, b) => a.holiday_date.localeCompare(b.holiday_date));
+    showToast(`${added} feriado(s) de ${year} importado(s).`, 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível buscar os feriados agora (serviço externo pode estar indisponível). Você ainda pode cadastrar manualmente.', 'error');
+  } finally {
+    onDone?.();
+  }
+}
+
+// `validRows` já vem filtrado e validado por js/csv.js (validateImportRows).
+// Cada item tem `.mapped` com os campos prontos, faltando só resolver
+// empresa (criar se não existir) e responsável (vincular a um perfil, se
+// o nome bater com alguém já cadastrado).
+export async function doImportObligations(validRows, onDone) {
+  if (!validRows.length) return;
+  try {
+    const companyCache = new Map();
+    for (const row of validRows) {
+      const key = row.mapped.empresaNome.toLowerCase();
+      if (row.mapped.empresaNome && !companyCache.has(key)) {
+        const company = await ensureCompany(row.mapped.empresaNome);
+        companyCache.set(key, company);
+        if (company && !STATE.companies.some((c) => c.id === company.id)) {
+          STATE.companies.push(company);
+        }
+      }
+    }
+
+    const payloads = validRows.map((row) => {
+      const { mapped } = row;
+      const company = mapped.empresaNome ? companyCache.get(mapped.empresaNome.toLowerCase()) : null;
+      const profile = mapped.responsibleText
+        ? STATE.profiles.find((p) => (p.display_name || '').toLowerCase() === mapped.responsibleText.toLowerCase())
+        : null;
+      return {
+        name: mapped.name,
+        category: mapped.category,
+        company_id: company ? company.id : null,
+        responsible: profile ? profile.display_name : mapped.responsibleText,
+        responsible_id: profile ? profile.id : null,
+        frequency: mapped.frequency,
+        day_of_month: mapped.day_of_month,
+        month: mapped.month,
+        months: mapped.months,
+        due_date: mapped.due_date,
+        notes: mapped.notes,
+      };
+    });
+
+    const created = await createObligationsBulk(payloads);
+    STATE.obligations.push(...created);
+    showToast(`${created.length} obrigação(ões) importada(s) com sucesso.`, 'success');
+    STATE.importPreview = null;
+    onDone?.({ success: created.length });
+  } catch (err) {
+    console.error(err);
+    showToast('Falha ao importar. Nenhuma obrigação foi salva — corrija e tente de novo.', 'error');
+    onDone?.({ success: 0 });
   }
 }

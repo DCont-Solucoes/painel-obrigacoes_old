@@ -13,6 +13,19 @@ export const FREQ_LABELS = {
   pontual: 'Pontual',
 };
 
+export const FREQUENCIES = ['mensal', 'trimestral', 'anual', 'pontual'];
+
+export const PRIORITIES = [
+  { key: 'baixa', label: 'Baixa' },
+  { key: 'media', label: 'Média' },
+  { key: 'alta', label: 'Alta' },
+  { key: 'critica', label: 'Crítica' },
+];
+
+export function priorityInfo(key) {
+  return PRIORITIES.find((p) => p.key === key) || PRIORITIES[1];
+}
+
 export const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 export const MONTH_FULL = [

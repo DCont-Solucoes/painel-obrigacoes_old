@@ -22,13 +22,31 @@ export function escapeHtml(s) {
   }[c]));
 }
 
+// Empurra a data para a frente até cair num dia que não seja sábado(6),
+// domingo(0) nem um feriado cadastrado em `holidaysSet` (Set de strings
+// "YYYY-MM-DD"). Não altera nada se `enabled` for falso — usado só quando
+// a obrigação tem adjust_business_day = true.
+export function shiftToBusinessDay(date, holidaysSet, enabled) {
+  if (!enabled) return date;
+  const d = new Date(date);
+  while (d.getDay() === 0 || d.getDay() === 6 || holidaysSet.has(fmtKey(d))) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+
 // Todas as ocorrências de uma obrigação dentro do intervalo [from, to].
-export function occurrencesInRange(ob, from, to) {
+// `holidaysSet` é opcional (Set de strings "YYYY-MM-DD"); só é usado
+// quando a obrigação tem adjust_business_day = true.
+export function occurrencesInRange(ob, from, to, holidaysSet = new Set()) {
   const res = [];
+  const push = (raw) => {
+    const dd = shiftToBusinessDay(raw, holidaysSet, ob.adjust_business_day);
+    if (dd >= from && dd <= to) res.push(dd);
+  };
 
   if (ob.frequency === 'pontual') {
-    const d = new Date(`${ob.due_date}T00:00:00`);
-    if (d >= from && d <= to) res.push(d);
+    push(new Date(`${ob.due_date}T00:00:00`));
     return res;
   }
 
@@ -38,8 +56,7 @@ export function occurrencesInRange(ob, from, to) {
     for (let y = y0; y <= yEnd; y++) {
       const dim = daysInMonth(y, ob.month - 1);
       const day = Math.min(ob.day_of_month, dim);
-      const dd = new Date(y, ob.month - 1, day);
-      if (dd >= from && dd <= to) res.push(dd);
+      push(new Date(y, ob.month - 1, day));
     }
     return res;
   }
@@ -51,8 +68,7 @@ export function occurrencesInRange(ob, from, to) {
       (ob.months || []).forEach((m) => {
         const dim = daysInMonth(y, m - 1);
         const day = Math.min(ob.day_of_month, dim);
-        const dd = new Date(y, m - 1, day);
-        if (dd >= from && dd <= to) res.push(dd);
+        push(new Date(y, m - 1, day));
       });
     }
     res.sort((a, b) => a - b);
@@ -65,8 +81,7 @@ export function occurrencesInRange(ob, from, to) {
     while (cur < end) {
       const dim = daysInMonth(cur.getFullYear(), cur.getMonth());
       const day = Math.min(ob.day_of_month, dim);
-      const dd = new Date(cur.getFullYear(), cur.getMonth(), day);
-      if (dd >= from && dd <= to) res.push(dd);
+      push(new Date(cur.getFullYear(), cur.getMonth(), day));
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     }
     return res;
@@ -76,7 +91,7 @@ export function occurrencesInRange(ob, from, to) {
 }
 
 // Próxima ocorrência ainda não concluída (janela de -90/+180 dias).
-export function getActiveOccurrence(ob, completionsByObligation) {
+export function getActiveOccurrence(ob, completionsByObligation, holidaysSet = new Set()) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const from = new Date(today);
@@ -84,7 +99,7 @@ export function getActiveOccurrence(ob, completionsByObligation) {
   const to = new Date(today);
   to.setDate(to.getDate() + 180);
 
-  const occs = occurrencesInRange(ob, from, to).sort((a, b) => a - b);
+  const occs = occurrencesInRange(ob, from, to, holidaysSet).sort((a, b) => a - b);
   const done = completionsByObligation.get(ob.id) || new Set();
   for (const occ of occs) {
     if (!done.has(fmtKey(occ))) return occ;
