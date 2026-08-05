@@ -70,11 +70,12 @@ promover alguém a administrador.
 > Se alguém esquecer a senha, você (como administrador) pode redefinir pelo
 > mesmo painel: **Authentication → Users → (usuário) → Reset password**.
 
-## 5. Promover você mesmo (e outros) a administrador
+## 5. Promover você mesmo (primeiro administrador)
 
-Por segurança, promover alguém a administrador **não é feito pela tela do
-painel** — é feito uma única vez pelo SQL Editor do Supabase, por quem tem
-acesso ao painel do Supabase (você).
+Por segurança, o **primeiro** administrador do projeto precisa ser
+promovido pelo SQL Editor do Supabase — depois disso, promover ou
+rebaixar qualquer outra pessoa já pode ser feito direto na tela do painel
+(aba **Gerenciar → Equipe**), sem precisar mais mexer em SQL.
 
 1. Volte no **SQL Editor → New query**.
 2. Cole (trocando pelo e-mail da pessoa):
@@ -84,15 +85,17 @@ update profiles set role = 'admin' where email = 'seu-email@empresa.com.br';
 ```
 
 3. Clique em **Run**.
-4. Repita para cada pessoa que deve ter permissão de administrador
-   (normalmente 1 ou 2 pessoas da controladoria — o resto da equipe fica
-   como "membro", que já é suficiente para o uso do dia a dia).
 
 Para conferir quem é admin hoje, rode:
 
 ```sql
 select email, role from profiles order by role, email;
 ```
+
+A partir daqui, para promover mais alguém a administrador (ou rebaixar
+alguém de volta a membro), basta logar no painel como administrador, ir em
+**Gerenciar → Equipe** e clicar em "Tornar admin" / "Tornar membro" ao
+lado do nome da pessoa. Não precisa mais voltar ao SQL Editor para isso.
 
 ## 6. Conectar o projeto ao seu Supabase
 
@@ -201,9 +204,11 @@ calendário de obrigações, está tudo certo.
 O que você ganha com essa estrutura: ninguém acessa nem edita o painel sem
 e-mail e senha válidos; a senha nunca fica visível em lugar nenhum (o
 Supabase cuida da criptografia); só administradores conseguem
-cadastrar/editar/excluir obrigações (garantido pelo próprio banco de
+cadastrar/editar/excluir obrigações e empresas, e só administradores
+podem promover ou rebaixar outras contas (garantido pelo próprio banco de
 dados, não só pela tela); e você controla exatamente quem tem conta e quem
-é administrador.
+é administrador — tudo isso direto pela aba Gerenciar → Equipe, depois do
+primeiro admin criado no passo 5.
 
 O que continua sendo sua responsabilidade: escolher senhas fortes para a
 equipe, desativar o acesso de quem sair do time (**Authentication → Users

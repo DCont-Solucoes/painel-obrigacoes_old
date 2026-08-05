@@ -25,13 +25,16 @@ painel-obrigacoes/
 │   │   ├── completions.js    marcar/desfazer conclusões
 │   │   └── companies.js      empresas
 │   └── ui/
-│       ├── login.js          tela de login
-│       ├── toolbar.js        abas + filtros
-│       ├── board.js          painel (cartões agrupados por status)
-│       ├── manage.js         aba "Gerenciar" (lista administrativa)
-│       ├── modal.js          formulário de nova/editar obrigação
-│       ├── toast.js          notificações não-bloqueantes (substitui alert())
-│       └── confirmDialog.js  diálogo de confirmação (substitui confirm())
+│       ├── login.js           tela de login
+│       ├── toolbar.js         abas + filtros
+│       ├── board.js           painel (cartões agrupados por status)
+│       ├── manage.js          aba "Gerenciar": orquestra as 3 sub-abas abaixo
+│       ├── manageObligations.js  sub-aba Obrigações (lista administrativa)
+│       ├── manageCompanies.js    sub-aba Empresas (cadastrar/renomear/excluir)
+│       ├── manageTeam.js         sub-aba Equipe (alternar papel admin/membro)
+│       ├── modal.js           formulário de nova/editar obrigação
+│       ├── toast.js           notificações não-bloqueantes (substitui alert())
+│       └── confirmDialog.js   diálogo de confirmação (substitui confirm())
 └── sql/
     └── schema.sql            tabelas, papéis (RLS) — rode isto no Supabase
 ```
@@ -74,6 +77,30 @@ Agora:
 Cada gravação afeta só a linha correspondente. Não existe mais "documento
 inteiro" para conflitar.
 
+## Telas de administração (aba "Gerenciar")
+
+Visível só para quem tem perfil `admin`. Tem três sub-abas:
+
+- **Obrigações** — cadastrar, editar, excluir (o CRUD original).
+- **Empresas** — cadastrar, renomear, excluir. Ao excluir uma empresa que
+  tenha obrigações vinculadas, o vínculo simplesmente vira nulo nessas
+  obrigações (`on delete set null` no schema) — a obrigação não é apagada.
+- **Equipe** — lista todas as contas (`profiles`) e permite alternar o
+  papel de acesso (`admin` ⇄ `membro`) com um clique. **Criar** uma conta
+  nova continua sendo feito pelo painel do Supabase (Authentication →
+  Users) — não existe (de propósito) um endpoint no front-end para criar
+  usuários, porque isso exigiria a `service_role key`, que não deve nunca
+  ficar exposta no navegador. A tela de Equipe só lê/atualiza a tabela
+  `profiles`, que já é criada automaticamente pelo gatilho do banco quando
+  a conta é criada.
+
+Um administrador pode, inclusive, remover o próprio acesso de admin — a
+interface pede confirmação extra nesse caso (`data.js → doChangeRole`),
+mas não bloqueia, para não deixar o sistema sem ninguém com esse poder em
+caso de erro deliberado. Se isso acontecer sem querer, outro admin resolve
+pela tela, ou, na ausência de qualquer admin, pelo SQL Editor do Supabase
+(`update profiles set role='admin' where email='...'`).
+
 ## Papéis de acesso (RLS)
 
 Implementado inteiramente com recursos gratuitos do Supabase (Postgres RLS
@@ -88,7 +115,7 @@ política. Resumo:
 | Desfazer **própria** conclusão          |  ✅   |   ✅   |
 | Desfazer conclusão de **outra pessoa**  |  ✅   |   ❌   |
 | Criar/editar/excluir obrigações         |  ✅   |   ❌   |
-| Criar/editar empresas                   |  ✅   |   ❌   |
+| Criar/editar/excluir empresas           |  ✅   |   ❌   |
 | Alterar papel de acesso de alguém       |  ✅   |   ❌   |
 
 Importante: essas regras são aplicadas **no banco de dados** (RLS), não só
@@ -98,10 +125,11 @@ diretamente, o Postgres recusa a gravação se a pessoa não for admin. Isso é
 o que torna esse controle de acesso confiável de verdade, e não só
 cosmético.
 
-O primeiro administrador precisa ser promovido manualmente rodando um
-`UPDATE` no SQL Editor (passo a passo no SETUP.md) — não existe endpoint
-de "promover a admin" na interface, de propósito, para essa ação
-sensível exigir acesso direto ao painel do Supabase.
+O **primeiro** administrador do projeto precisa ser promovido manualmente
+rodando um `UPDATE` no SQL Editor (passo a passo no SETUP.md), já que
+ainda não existe nenhum admin para usar a tela de Equipe. Depois desse
+primeiro passo, promover ou rebaixar qualquer outra pessoa já pode ser
+feito direto pela aba Gerenciar → Equipe, sem precisar mais de SQL.
 
 ## Segurança contra XSS
 
@@ -164,11 +192,11 @@ credenciais de um projeto Supabase de teste (ou de desenvolvimento) e rode
 - O gerenciamento de contas (criar/desativar usuário) continua sendo feito
   pelo painel do Supabase (Authentication → Users), não pela interface do
   painel — é a forma mais simples de manter isso sem custo e sem expor a
-  `service_role key` no front-end.
-- Promover alguém a admin exige rodar um `UPDATE` manual no SQL Editor
-  (documentado no SETUP.md). Dá para construir uma tela de administração
-  de papéis dentro do próprio painel futuramente, se fizer sentido — hoje
-  ficou de fora para manter o escopo enxuto.
+  `service_role key` no front-end. Promover/rebaixar quem **já tem
+  conta**, porém, já é feito direto pela aba Gerenciar → Equipe.
+- O **primeiro** administrador de um projeto novo ainda exige rodar um
+  `UPDATE` manual no SQL Editor (documentado no SETUP.md), porque até esse
+  ponto não existe nenhum admin para usar a tela de Equipe.
 - Não há testes automatizados no repositório (a suíte de testes usada
   durante o desenvolvimento foi manual, com um mock do Supabase, e não faz
   parte da entrega). Se o projeto crescer, vale considerar algo simples
