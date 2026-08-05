@@ -3,8 +3,10 @@
 // foi carregado nesta sessão do navegador, para renderizar rápido.
 export const STATE = {
   view: 'board', // 'board' | 'manage'
+  manageSection: 'obligations', // 'obligations' | 'companies' | 'team' (dentro da aba Gerenciar)
   filters: { empresa: 'all', category: 'all', responsible: 'all' },
   editingId: null,
+  editingCompanyId: null,
 
   session: null, // { id, email }
   profile: null, // { id, email, display_name, role }
@@ -12,6 +14,7 @@ export const STATE = {
   obligations: [],
   companies: [],
   completions: [], // linhas cruas da tabela completions
+  profiles: [], // equipe (todas as contas), visível a partir da aba Gerenciar → Equipe
 
   loading: false,
   connectionError: null,

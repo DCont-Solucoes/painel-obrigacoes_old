@@ -1,25 +1,28 @@
 import { STATE, isAdmin } from './state.js';
 import { fetchObligations, createObligation, updateObligation, deleteObligation as apiDeleteObligation } from './api/obligations.js';
 import { fetchCompletions, markCompletion, deleteCompletion } from './api/completions.js';
-import { fetchCompanies, ensureCompany } from './api/companies.js';
+import { fetchCompanies, ensureCompany, createCompany, updateCompany, deleteCompany as apiDeleteCompany } from './api/companies.js';
+import { fetchProfiles, updateProfile } from './api/profiles.js';
 import { getActiveOccurrence, fmtKey } from './dateUtils.js';
 import { showToast } from './ui/toast.js';
 import { confirmDialog } from './ui/confirmDialog.js';
 
-// Carrega as três tabelas em paralelo. Cada uma é independente — se uma
+// Carrega as quatro tabelas em paralelo. Cada uma é independente — se uma
 // falhar (ex.: sem conexão), as outras ainda tentam, e sinalizamos o erro
 // via STATE.connectionError para a interface mostrar o banner de aviso.
 export async function loadAll() {
   STATE.connectionError = null;
   try {
-    const [obligations, completions, companies] = await Promise.all([
+    const [obligations, completions, companies, profiles] = await Promise.all([
       fetchObligations(),
       fetchCompletions(),
       fetchCompanies(),
+      fetchProfiles(),
     ]);
     STATE.obligations = obligations;
     STATE.completions = completions;
     STATE.companies = companies;
+    STATE.profiles = profiles;
   } catch (err) {
     console.error('Falha ao carregar dados do painel', err);
     STATE.connectionError = 'Não foi possível carregar os dados agora. Verifique sua conexão com a internet.';
@@ -161,5 +164,94 @@ export async function doSaveObligation(id, formData, onDone) {
   } catch (err) {
     console.error(err);
     showToast('Não foi possível salvar. Verifique os campos e tente novamente.', 'error');
+  }
+}
+
+// ---------- empresas (CRUD) ----------
+
+export async function doCreateCompany(name, onDone) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) { showToast('Informe o nome da empresa.', 'error'); return; }
+  if (STATE.companies.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+    showToast('Já existe uma empresa com esse nome.', 'error');
+    return;
+  }
+  try {
+    const created = await createCompany(trimmed);
+    STATE.companies.push(created);
+    STATE.companies.sort((a, b) => a.name.localeCompare(b.name));
+    showToast('Empresa cadastrada.', 'success');
+    onDone?.(created);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível cadastrar a empresa agora.', 'error');
+  }
+}
+
+export async function doRenameCompany(id, name, onDone) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) { showToast('Informe o nome da empresa.', 'error'); return; }
+  try {
+    const updated = await updateCompany(id, trimmed);
+    STATE.companies = STATE.companies.map((c) => (c.id === id ? updated : c));
+    STATE.companies.sort((a, b) => a.name.localeCompare(b.name));
+    showToast('Empresa atualizada.', 'success');
+    onDone?.(updated);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível salvar o novo nome agora.', 'error');
+  }
+}
+
+export async function doDeleteCompany(id, onDone) {
+  const inUse = STATE.obligations.filter((o) => o.company_id === id).length;
+  const ok = await confirmDialog({
+    title: 'Excluir empresa',
+    message: inUse
+      ? `Excluir esta empresa? ${inUse} obrigação(ões) associada(s) a ela ficarão sem empresa vinculada — elas não serão excluídas.`
+      : 'Excluir esta empresa do painel?',
+    confirmLabel: 'Excluir',
+  });
+  if (!ok) return;
+
+  try {
+    await apiDeleteCompany(id);
+    STATE.companies = STATE.companies.filter((c) => c.id !== id);
+    STATE.obligations = STATE.obligations.map((o) => (o.company_id === id ? { ...o, company_id: null } : o));
+    showToast('Empresa excluída.', 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível excluir agora. Tente novamente.', 'error');
+  } finally {
+    onDone?.();
+  }
+}
+
+// ---------- equipe (papéis de acesso) ----------
+
+export async function doChangeRole(profileId, newRole, onDone) {
+  if (!isAdmin()) return;
+  const person = STATE.profiles.find((p) => p.id === profileId);
+  if (!person) return;
+
+  if (profileId === STATE.session?.id && newRole === 'membro') {
+    const ok = await confirmDialog({
+      title: 'Remover seu próprio acesso de administrador',
+      message: 'Você está prestes a se rebaixar para membro. Você perderá acesso a esta área imediatamente. Deseja continuar?',
+      confirmLabel: 'Continuar',
+    });
+    if (!ok) return;
+  }
+
+  try {
+    const updated = await updateProfile(profileId, { role: newRole });
+    STATE.profiles = STATE.profiles.map((p) => (p.id === profileId ? updated : p));
+    if (profileId === STATE.session?.id) STATE.profile = updated;
+    showToast(`${person.display_name || person.email} agora é ${newRole === 'admin' ? 'administrador(a)' : 'membro'}.`, 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível alterar o papel agora.', 'error');
+  } finally {
+    onDone?.();
   }
 }

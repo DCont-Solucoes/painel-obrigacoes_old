@@ -4,7 +4,10 @@ import { renderToolbar } from './ui/toolbar.js';
 import { renderBoard } from './ui/board.js';
 import { renderManage } from './ui/manage.js';
 import { openModal, closeModal } from './ui/modal.js';
-import { doMarkDone, doUndoLast, doDeleteObligation, loadAll } from './data.js';
+import {
+  doMarkDone, doUndoLast, doDeleteObligation, loadAll,
+  doCreateCompany, doRenameCompany, doDeleteCompany, doChangeRole,
+} from './data.js';
 import { signOut } from './api/auth.js';
 
 function renderConnBanner() {
@@ -73,4 +76,49 @@ function onAppClick(e) {
   if (action === 'undo') { doUndoLast(id, render); return; }
   if (action === 'delete') { if (isAdmin()) doDeleteObligation(id, render); return; }
   if (action === 'close') { closeModal(); return; }
+
+  if (action === 'manage-tab') {
+    if (!isAdmin()) return;
+    STATE.manageSection = btn.getAttribute('data-section');
+    STATE.editingCompanyId = null;
+    render();
+    return;
+  }
+
+  if (action === 'company-add') {
+    if (!isAdmin()) return;
+    const input = document.getElementById('newCompanyName');
+    doCreateCompany(input?.value || '', render);
+    return;
+  }
+  if (action === 'company-edit') {
+    if (!isAdmin()) return;
+    STATE.editingCompanyId = id;
+    render();
+    return;
+  }
+  if (action === 'company-cancel-edit') {
+    STATE.editingCompanyId = null;
+    render();
+    return;
+  }
+  if (action === 'company-save-edit') {
+    if (!isAdmin()) return;
+    const input = document.getElementById(`editCompanyName-${id}`);
+    STATE.editingCompanyId = null;
+    doRenameCompany(id, input?.value || '', render);
+    return;
+  }
+  if (action === 'company-delete') {
+    if (!isAdmin()) return;
+    doDeleteCompany(id, render);
+    return;
+  }
+
+  if (action === 'team-toggle-role') {
+    if (!isAdmin()) return;
+    const nextRole = btn.getAttribute('data-next-role');
+    doChangeRole(id, nextRole, render);
+    return;
+  }
 }

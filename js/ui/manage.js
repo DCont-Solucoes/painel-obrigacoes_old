@@ -1,29 +1,32 @@
-import { STATE, isAdmin, companyName } from '../state.js';
-import { catInfo, FREQ_LABELS } from '../constants.js';
-import { freqSummary, escapeHtml } from '../dateUtils.js';
+import { STATE, isAdmin } from '../state.js';
+import { renderObligationsManage } from './manageObligations.js';
+import { renderCompaniesManage } from './manageCompanies.js';
+import { renderTeamManage } from './manageTeam.js';
+
+function subTabsHtml() {
+  const tabs = [
+    ['obligations', 'Obrigações'],
+    ['companies', 'Empresas'],
+    ['team', 'Equipe'],
+  ];
+  return '<div class="mgmt-subtabs">' + tabs.map(([key, label]) => (
+    `<button class="tab-btn ${STATE.manageSection === key ? 'active' : ''}" data-action="manage-tab" data-section="${key}">${label}</button>`
+  )).join('') + '</div>';
+}
 
 export function renderManage() {
   if (!isAdmin()) {
-    return '<div class="empty">Esta área é restrita a administradores. Fale com um administrador do painel se precisar cadastrar ou alterar obrigações.</div>';
+    return '<div class="empty">Esta área é restrita a administradores. Fale com um administrador do painel se precisar cadastrar ou alterar obrigações, empresas ou papéis de acesso.</div>';
   }
 
-  if (!STATE.obligations.length) {
-    return '<div class="empty">Nenhuma obrigação cadastrada ainda. Use "+ Nova obrigação" para começar o calendário do seu grupo.</div>';
+  let body;
+  if (STATE.manageSection === 'companies') {
+    body = renderCompaniesManage();
+  } else if (STATE.manageSection === 'team') {
+    body = renderTeamManage();
+  } else {
+    body = renderObligationsManage();
   }
 
-  const list = STATE.obligations.slice().sort((a, b) => a.name.localeCompare(b.name));
-  return list.map((ob) => {
-    const cat = catInfo(ob.category);
-    return '<div class="mgmt-row">'
-      + '<div class="mgmt-main">'
-        + `<div class="mgmt-name">${escapeHtml(ob.name)} <span class="badge" style="border-color:${cat.color};color:${cat.color};">${cat.label}</span></div>`
-        + `<div class="mgmt-sub">🏢 ${escapeHtml(companyName(ob.company_id) || '—')} · ${FREQ_LABELS[ob.frequency]} · ${escapeHtml(freqSummary(ob))} · Responsável: ${escapeHtml(ob.responsible || '—')}</div>`
-      + '</div>'
-      + '<div class="mgmt-actions">'
-        + `<button class="icon-btn" data-action="edit" data-id="${ob.id}">Editar</button>`
-        + `<button class="icon-btn" data-action="undo" data-id="${ob.id}">↺ Desfazer conclusão</button>`
-        + `<button class="icon-btn danger" data-action="delete" data-id="${ob.id}">Excluir</button>`
-      + '</div>'
-      + '</div>';
-  }).join('');
+  return subTabsHtml() + '<div class="mgmt-section">' + body + '</div>';
 }

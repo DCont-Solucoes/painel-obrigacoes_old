@@ -163,6 +163,14 @@ h1{
 }
 
 /* ---------- manage table ---------- */
+.mgmt-subtabs{display:flex;gap:6px;margin-bottom:14px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px;width:fit-content;}
+.mgmt-section{margin-top:2px;}
+.mgmt-add-row{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+.mgmt-add-input{
+  flex:1;min-width:220px;font-family:'Inter',sans-serif;font-size:14px;padding:9px 10px;
+  border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);outline:none;
+}
+.mgmt-add-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,107,118,.15);}
 .mgmt-row{
   display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
   border-radius:9px;padding:11px 13px;margin-bottom:8px;flex-wrap:wrap;

@@ -40,6 +40,11 @@ acesso — cada uma protegida por regras de segurança (RLS) que garantem que
 administradores podem cadastrar/editar/excluir obrigações (qualquer pessoa
 da equipe pode marcar conclusões).
 
+> **Se precisar rodar este script de novo no mesmo projeto** (por exemplo,
+> para atualizar para uma versão mais nova do painel), pode colar e rodar
+> o arquivo inteiro de novo sem problema — o script foi escrito para ser
+> seguro nesse caso (não trava com erros de "já existe").
+
 ## 3. Desligar o cadastro público
 
 Por padrão, qualquer pessoa poderia criar uma conta sozinha. Como você quer

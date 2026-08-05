@@ -17,3 +17,24 @@ export async function ensureCompany(name) {
   if (error) throw error;
   return data;
 }
+
+export async function createCompany(name) {
+  const { data, error } = await supabase.from('companies').insert({ name: name.trim() }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateCompany(id, name) {
+  const { data, error } = await supabase.from('companies').update({ name: name.trim() }).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Empresas usadas em alguma obrigação: o vínculo (company_id) simplesmente
+// vira nulo nessas obrigações (on delete set null, definido no schema) — a
+// obrigação continua existindo, só sem empresa associada.
+export async function deleteCompany(id) {
+  const { error } = await supabase.from('companies').delete().eq('id', id);
+  if (error) throw error;
+}
+

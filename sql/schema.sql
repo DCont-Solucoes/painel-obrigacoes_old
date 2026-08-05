@@ -8,6 +8,11 @@
 -- Rode este script inteiro de uma vez no SQL Editor do Supabase, num projeto
 -- novo (ou depois de apagar a tabela antiga board_state, se for migrar um
 -- projeto existente — veja o bloco de migração comentado no final).
+--
+-- O script é seguro para rodar mais de uma vez no mesmo projeto (idempotente):
+-- tabelas, políticas, funções e gatilhos são recriados sem gerar erro de
+-- "já existe" se você rodar tudo de novo (por exemplo, depois de atualizar
+-- este arquivo numa versão futura do painel).
 -- =============================================================================
 
 -- Extensão necessária para gen_random_uuid()
@@ -66,6 +71,7 @@ create trigger on_auth_user_created
 
 alter table profiles enable row level security;
 
+drop policy if exists "profiles_select_authenticated" on profiles;
 create policy "profiles_select_authenticated"
   on profiles for select
   to authenticated
@@ -74,6 +80,7 @@ create policy "profiles_select_authenticated"
 -- Só admin pode alterar papel/nome de outras pessoas. Qualquer pessoa pode
 -- alterar o próprio display_name (mas não o próprio "role" — isso é
 -- bloqueado abaixo por um gatilho, para ninguém conseguir se autopromover).
+drop policy if exists "profiles_update_admin_or_self" on profiles;
 create policy "profiles_update_admin_or_self"
   on profiles for update
   to authenticated
@@ -87,7 +94,15 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.role is distinct from old.role and not is_admin(auth.uid()) then
+  -- Só bloqueia quando a alteração vem de uma sessão autenticada comum
+  -- (front-end, via PostgREST/RLS) e essa pessoa não é admin. Quando
+  -- auth.uid() é nulo, a gravação está vindo de fora desse contexto — por
+  -- exemplo, do SQL Editor do Supabase, usado no bootstrap do primeiro
+  -- administrador (passo 5 do SETUP.md) — e não deve ser bloqueada, pois
+  -- quem tem acesso ao SQL Editor do projeto já tem confiança máxima.
+  if new.role is distinct from old.role
+     and auth.uid() is not null
+     and not is_admin(auth.uid()) then
     raise exception 'Só um administrador pode alterar papéis de acesso.';
   end if;
   return new;
@@ -110,22 +125,26 @@ create table if not exists companies (
 
 alter table companies enable row level security;
 
+drop policy if exists "companies_select_authenticated" on companies;
 create policy "companies_select_authenticated"
   on companies for select
   to authenticated
   using (true);
 
+drop policy if exists "companies_insert_admin" on companies;
 create policy "companies_insert_admin"
   on companies for insert
   to authenticated
   with check (is_admin(auth.uid()));
 
+drop policy if exists "companies_update_admin" on companies;
 create policy "companies_update_admin"
   on companies for update
   to authenticated
   using (is_admin(auth.uid()))
   with check (is_admin(auth.uid()));
 
+drop policy if exists "companies_delete_admin" on companies;
 create policy "companies_delete_admin"
   on companies for delete
   to authenticated
@@ -163,22 +182,26 @@ create index if not exists obligations_frequency_idx on obligations(frequency);
 
 alter table obligations enable row level security;
 
+drop policy if exists "obligations_select_authenticated" on obligations;
 create policy "obligations_select_authenticated"
   on obligations for select
   to authenticated
   using (true);
 
+drop policy if exists "obligations_insert_admin" on obligations;
 create policy "obligations_insert_admin"
   on obligations for insert
   to authenticated
   with check (is_admin(auth.uid()));
 
+drop policy if exists "obligations_update_admin" on obligations;
 create policy "obligations_update_admin"
   on obligations for update
   to authenticated
   using (is_admin(auth.uid()))
   with check (is_admin(auth.uid()));
 
+drop policy if exists "obligations_delete_admin" on obligations;
 create policy "obligations_delete_admin"
   on obligations for delete
   to authenticated
@@ -224,6 +247,7 @@ create index if not exists completions_obligation_idx on completions(obligation_
 
 alter table completions enable row level security;
 
+drop policy if exists "completions_select_authenticated" on completions;
 create policy "completions_select_authenticated"
   on completions for select
   to authenticated
@@ -232,6 +256,7 @@ create policy "completions_select_authenticated"
 -- Qualquer pessoa autenticada pode marcar uma conclusão (isso é a ação do
 -- dia a dia da equipe). O done_by é sempre o próprio usuário logado — a
 -- política abaixo impede que alguém grave conclusão em nome de outra pessoa.
+drop policy if exists "completions_insert_own" on completions;
 create policy "completions_insert_own"
   on completions for insert
   to authenticated
@@ -240,6 +265,7 @@ create policy "completions_insert_own"
 -- Desfazer: a própria pessoa pode desfazer o que ela concluiu; admin pode
 -- desfazer qualquer conclusão (ex.: corrigir um clique errado de outra
 -- pessoa do time).
+drop policy if exists "completions_delete_own_or_admin" on completions;
 create policy "completions_delete_own_or_admin"
   on completions for delete
   to authenticated
