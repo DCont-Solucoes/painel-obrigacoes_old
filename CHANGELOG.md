@@ -131,6 +131,58 @@ clicar em "+ Nova obrigação" uma vez para cada item, manualmente.
   automaticamente e tenta vincular o responsável a alguém já cadastrado.
   Só depois de você conferir e confirmar é que os dados entram no banco.
 
+## 10. Oito melhorias de gestão, de uma vez
+
+> **Sobre os dados que já estão cadastrados:** nenhuma obrigação, conclusão,
+> empresa ou conta foi apagada ou alterada por essas mudanças. Todas as
+> novidades usam tabelas e colunas novas, adicionadas ao banco sem tocar
+> no que já existia — isso foi testado explicitamente antes da entrega.
+
+Essa leva de mudanças foi pensada para o painel deixar de ser só um
+"quadro de status" e virar uma ferramenta que ajuda a equipe a não deixar
+nada passar.
+
+**Prioridade nas obrigações.** Dá para marcar uma obrigação como Baixa,
+Média, Alta ou Crítica. As de prioridade Alta/Crítica ganham um selo
+vermelho no cartão, para chamar atenção mesmo que o prazo ainda esteja
+longe.
+
+**Comentários por obrigação.** Dentro do cadastro de cada obrigação, agora
+dá para deixar recados para o time — "confirmado com o contador",
+"prazo mudou, aguardando confirmação" — sem precisar de e-mail ou grupo de
+WhatsApp paralelo.
+
+**Histórico de quem mexeu em quê.** Toda criação, edição e exclusão de
+obrigação fica registrada (quem fez, quando, o que mudou), visível para
+administradores em Gerenciar → Histórico. Útil para auditoria e para
+entender "por que isso mudou" sem precisar perguntar.
+
+**Ajuste automático para dia útil.** Uma obrigação pode ser marcada para
+"empurrar o vencimento se cair num fim de semana ou feriado". Feriados
+nacionais podem ser importados com um clique; feriados estaduais/municipais
+específicos da sua região, cadastrados manualmente.
+
+**Comprovante anexado.** Ao marcar uma obrigação como concluída, aparece
+um convite (opcional) para já anexar o comprovante — a guia paga, o
+protocolo de envio, o que for. Fica salvo junto com aquela conclusão
+específica, disponível para consulta depois.
+
+**Relatório de cumprimento no prazo.** Uma aba nova (administradores)
+mostra que porcentagem das obrigações dos últimos 6 meses foi cumprida no
+prazo — geral, por empresa e por responsável. Dá para enxergar padrões
+("essa empresa está sempre atrasando", "esse tipo de obrigação é
+recorrente atrasar") sem precisar contar na mão.
+
+**Alertas por e-mail.** Todo dia útil de manhã, quem tem obrigação
+atrasada ou vencendo em breve recebe um e-mail automático — sem precisar
+abrir o painel para descobrir. Administradores recebem também um resumo
+geral da equipe inteira. (Esse item precisa de uma configuração extra,
+opcional — ver SETUP.md.)
+
+**Instalar como aplicativo.** O painel agora pode ser "instalado" no
+celular ou no computador (como um aplicativo de verdade, com ícone
+próprio), direto pelo navegador — sem passar por loja de aplicativo nenhuma.
+
 ## O que continua exatamente igual
 
 - Visual do painel (cores, tipografia, layout dos cartões).

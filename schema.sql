@@ -278,6 +278,200 @@ create policy "completions_delete_own_or_admin"
   to authenticated
   using (done_by = auth.uid() or is_admin(auth.uid()));
 
+-- -----------------------------------------------------------------------------
+-- 5) PRIORIDADE (campo simples em obligations)
+-- -----------------------------------------------------------------------------
+-- Coluna aditiva — não afeta nenhuma obrigação já cadastrada (todas ficam
+-- com 'media' por padrão). A validação dos valores permitidos é feita na
+-- interface (dropdown fechado), não por CHECK constraint, para manter esta
+-- migração simples de reaplicar.
+alter table obligations add column if not exists priority text not null default 'media';
+
+-- -----------------------------------------------------------------------------
+-- 6) COMENTÁRIOS por obrigação
+-- -----------------------------------------------------------------------------
+create table if not exists obligation_comments (
+  id uuid primary key default gen_random_uuid(),
+  obligation_id uuid not null references obligations(id) on delete cascade,
+  author_id uuid references profiles(id),
+  author_name text not null,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists obligation_comments_obligation_idx on obligation_comments(obligation_id);
+
+alter table obligation_comments enable row level security;
+
+drop policy if exists "obligation_comments_select_authenticated" on obligation_comments;
+create policy "obligation_comments_select_authenticated"
+  on obligation_comments for select
+  to authenticated
+  using (true);
+
+drop policy if exists "obligation_comments_insert_own" on obligation_comments;
+create policy "obligation_comments_insert_own"
+  on obligation_comments for insert
+  to authenticated
+  with check (author_id = auth.uid());
+
+drop policy if exists "obligation_comments_delete_own_or_admin" on obligation_comments;
+create policy "obligation_comments_delete_own_or_admin"
+  on obligation_comments for delete
+  to authenticated
+  using (author_id = auth.uid() or is_admin(auth.uid()));
+
+-- -----------------------------------------------------------------------------
+-- 7) TRILHA DE AUDITORIA (quem criou/editou/excluiu obrigações)
+-- -----------------------------------------------------------------------------
+-- Só admins conseguem consultar (dados de "quem fez o quê" são sensíveis).
+-- Ninguém grava direto nesta tabela pela aplicação — só o gatilho abaixo
+-- grava, via security definer, então nem RLS de insert é necessária: não
+-- existe política de insert/update/delete para o papel "authenticated",
+-- então a API bloqueia qualquer tentativa de escrita direta.
+create table if not exists audit_log (
+  id uuid primary key default gen_random_uuid(),
+  table_name text not null,
+  row_id uuid not null,
+  action text not null check (action in ('insert','update','delete')),
+  changed_by uuid references profiles(id),
+  changed_by_name text,
+  changed_at timestamptz not null default now(),
+  diff jsonb
+);
+
+create index if not exists audit_log_table_row_idx on audit_log(table_name, row_id);
+create index if not exists audit_log_changed_at_idx on audit_log(changed_at desc);
+
+alter table audit_log enable row level security;
+
+drop policy if exists "audit_log_select_admin" on audit_log;
+create policy "audit_log_select_admin"
+  on audit_log for select
+  to authenticated
+  using (is_admin(auth.uid()));
+
+create or replace function log_obligation_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_diff jsonb;
+  v_row_id uuid;
+begin
+  if tg_op = 'DELETE' then
+    v_row_id := old.id;
+    v_diff := to_jsonb(old);
+  elsif tg_op = 'UPDATE' then
+    v_row_id := new.id;
+    v_diff := jsonb_build_object('antes', to_jsonb(old), 'depois', to_jsonb(new));
+  else
+    v_row_id := new.id;
+    v_diff := to_jsonb(new);
+  end if;
+
+  insert into audit_log (table_name, row_id, action, changed_by, changed_by_name, diff)
+  values (
+    'obligations', v_row_id, lower(tg_op),
+    auth.uid(),
+    coalesce((select display_name from profiles where id = auth.uid()), 'sistema'),
+    v_diff
+  );
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_log_obligation_insert on obligations;
+create trigger trg_log_obligation_insert
+  after insert on obligations
+  for each row execute function log_obligation_change();
+
+drop trigger if exists trg_log_obligation_update on obligations;
+create trigger trg_log_obligation_update
+  after update on obligations
+  for each row execute function log_obligation_change();
+
+drop trigger if exists trg_log_obligation_delete on obligations;
+create trigger trg_log_obligation_delete
+  after delete on obligations
+  for each row execute function log_obligation_change();
+
+-- -----------------------------------------------------------------------------
+-- 8) FERIADOS e ajuste para dia útil
+-- -----------------------------------------------------------------------------
+-- Escopo desta função: se a obrigação tiver adjust_business_day = true, o
+-- painel empurra o vencimento calculado para a frente até cair num dia que
+-- não seja sábado/domingo nem um feriado cadastrado aqui. Isso NÃO calcula
+-- "o Nº-ésimo dia útil do mês" (regra que varia por tributo e é fácil de
+-- calcular errado silenciosamente) — é um ajuste mais simples e seguro:
+-- "não deixa vencer num fim de semana ou feriado".
+create table if not exists holidays (
+  id uuid primary key default gen_random_uuid(),
+  holiday_date date not null unique,
+  name text not null,
+  scope text not null default 'nacional' check (scope in ('nacional','estadual','municipal'))
+);
+
+alter table obligations add column if not exists adjust_business_day boolean not null default false;
+
+alter table holidays enable row level security;
+
+drop policy if exists "holidays_select_authenticated" on holidays;
+create policy "holidays_select_authenticated"
+  on holidays for select
+  to authenticated
+  using (true);
+
+drop policy if exists "holidays_insert_admin" on holidays;
+create policy "holidays_insert_admin"
+  on holidays for insert
+  to authenticated
+  with check (is_admin(auth.uid()));
+
+drop policy if exists "holidays_delete_admin" on holidays;
+create policy "holidays_delete_admin"
+  on holidays for delete
+  to authenticated
+  using (is_admin(auth.uid()));
+
+-- -----------------------------------------------------------------------------
+-- 9) COMPROVANTES anexados às conclusões (Supabase Storage)
+-- -----------------------------------------------------------------------------
+-- Cria o bucket de armazenamento (privado — só autenticados acessam) e as
+-- políticas de acesso aos arquivos. `on conflict do nothing` evita erro se
+-- o bucket já existir (por exemplo, se você criou manualmente antes).
+insert into storage.buckets (id, name, public)
+values ('comprovantes', 'comprovantes', false)
+on conflict (id) do nothing;
+
+drop policy if exists "comprovantes_select_authenticated" on storage.objects;
+create policy "comprovantes_select_authenticated"
+  on storage.objects for select
+  to authenticated
+  using (bucket_id = 'comprovantes');
+
+drop policy if exists "comprovantes_insert_authenticated" on storage.objects;
+create policy "comprovantes_insert_authenticated"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'comprovantes');
+
+drop policy if exists "comprovantes_delete_own_or_admin" on storage.objects;
+create policy "comprovantes_delete_own_or_admin"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'comprovantes' and (owner = auth.uid() or is_admin(auth.uid())));
+
+-- Coluna que guarda o caminho do arquivo dentro do bucket, associada à
+-- conclusão correspondente.
+alter table completions add column if not exists attachment_path text;
+
 -- =============================================================================
 -- Fim do schema. Próximo passo: veja o SETUP.md para criar o primeiro admin
 -- e as contas da equipe.

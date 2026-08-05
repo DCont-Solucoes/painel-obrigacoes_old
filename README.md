@@ -8,36 +8,52 @@ publicação em linguagem simples, veja `SETUP.md`.
 ```
 painel-obrigacoes/
 ├── index.html              shell HTML (login + <div id="app">)
+├── manifest.json            manifesto PWA (instalar no celular/desktop)
+├── sw.js                     service worker mínimo (só para instalabilidade — não cacheia nada)
+├── icons/                    ícones do PWA (192px e 512px)
+├── package.json              dependências só do script de alertas por e-mail (o painel em si não usa)
 ├── css/
 │   └── styles.css          identidade visual (preservada do painel original)
 ├── js/
 │   ├── config.js            ← único arquivo que você edita para publicar
 │   ├── supabaseClient.js    cria o cliente Supabase a partir do config.js
-│   ├── constants.js         categorias, rótulos de frequência, nomes de mês
-│   ├── dateUtils.js         cálculo de ocorrências, prazos, status (puro, sem DOM)
+│   ├── constants.js         categorias, prioridades, rótulos de frequência, nomes de mês
+│   ├── dateUtils.js         cálculo de ocorrências, prazos, status, ajuste de dia útil (puro, sem DOM)
 │   ├── state.js             estado em memória da sessão atual
 │   ├── data.js               ações de negócio (marcar concluído, salvar, excluir…)
 │   ├── csv.js                 leitura, validação e modelo do CSV de importação em massa
 │   ├── render.js             monta a tela e distribui os cliques (delegação de eventos)
-│   ├── app.js                 ponto de entrada: autenticação e boot
+│   ├── app.js                 ponto de entrada: autenticação, boot, registro do service worker
 │   ├── api/
 │   │   ├── auth.js           login/logout/perfil
 │   │   ├── obligations.js    CRUD de obrigações (inclui inserção em massa)
-│   │   ├── completions.js    marcar/desfazer conclusões
+│   │   ├── completions.js    marcar/desfazer conclusões, anexar comprovante
 │   │   ├── companies.js      empresas
-│   │   └── profiles.js       equipe (listar contas, alterar papel de acesso)
+│   │   ├── profiles.js       equipe (listar contas, alterar papel de acesso)
+│   │   ├── comments.js       comentários por obrigação
+│   │   ├── auditLog.js       trilha de auditoria (somente leitura)
+│   │   ├── holidays.js       feriados (cadastro manual + importação via BrasilAPI)
+│   │   └── storage.js        upload e link assinado dos comprovantes (Supabase Storage)
 │   └── ui/
 │       ├── login.js           tela de login
 │       ├── toolbar.js         abas + filtros
 │       ├── board.js           painel (cartões agrupados por status; também usado pela aba "Minhas obrigações")
-│       ├── manage.js          aba "Gerenciar": orquestra as 4 sub-abas abaixo
+│       ├── manage.js          aba "Gerenciar": orquestra as 6 sub-abas abaixo
 │       ├── manageObligations.js  sub-aba Obrigações (lista administrativa)
 │       ├── manageCompanies.js    sub-aba Empresas (cadastrar/renomear/excluir)
 │       ├── manageTeam.js         sub-aba Equipe (alternar papel admin/membro)
 │       ├── manageImport.js       sub-aba Importar CSV (cadastro em massa)
-│       ├── modal.js           formulário de nova/editar obrigação
+│       ├── manageHolidays.js     sub-aba Feriados
+│       ├── manageAudit.js        sub-aba Histórico (trilha de auditoria)
+│       ├── reports.js            aba Relatórios (taxa de cumprimento no prazo)
+│       ├── modal.js           formulário de nova/editar obrigação + comentários
+│       ├── attachDialog.js    diálogo opcional de anexar comprovante após concluir
 │       ├── toast.js           notificações não-bloqueantes (substitui alert())
 │       └── confirmDialog.js   diálogo de confirmação (substitui confirm())
+├── scripts/
+│   └── enviar-alertas.mjs    script Node — alertas diários por e-mail (roda via GitHub Actions)
+├── .github/workflows/
+│   └── alertas-diarios.yml   agenda o script acima (grátis, GitHub Actions)
 └── sql/
     └── schema.sql            tabelas, papéis (RLS) — rode isto no Supabase
 ```
@@ -152,6 +168,40 @@ frequencia, dia, mes, meses, data, observacoes`. `categoria` e
 `trimestral`, `anual`, `pontual`) — o botão "Baixar modelo CSV" na própria
 tela gera um arquivo de exemplo já no formato certo.
 
+## Prioridade, comentários e histórico
+
+- **Prioridade** (`obligations.priority`): `baixa | media | alta | critica`, validada só na interface (dropdown fechado). Obrigações `alta`/`critica` ganham um selo vermelho no cartão, independente do status de prazo.
+- **Comentários** (`obligation_comments`): qualquer pessoa autenticada comenta; só o autor ou um admin exclui. Aparecem dentro do modal de edição da obrigação (só quando editando, não ao criar — precisa existir um `obligation_id`).
+- **Trilha de auditoria** (`audit_log`): populada automaticamente por gatilhos (`log_obligation_change()`) em todo INSERT/UPDATE/DELETE de `obligations`. Não existe política de escrita para o papel `authenticated` nessa tabela — só o gatilho grava (via `security definer`), e só admins conseguem consultar (aba Gerenciar → Histórico).
+
+## Feriados e ajuste para dia útil
+
+Cada obrigação tem um campo opcional `adjust_business_day`. Quando ativo, `dateUtils.js → shiftToBusinessDay()` empurra a data calculada para a frente até cair num dia que não seja sábado, domingo, nem uma data presente na tabela `holidays`.
+
+**Isso é uma simplificação deliberada.** Não implementamos "o Nº-ésimo dia útil do mês" (regra que várias obrigações fiscais brasileiras realmente usam, e que varia por tributo/UF/município) — calcular isso errado silenciosamente é pior do que não calcular. O que existe é mais simples e mais seguro: "não deixa o vencimento cair num fim de semana ou feriado cadastrado". Para obrigações com regra de dia útil mais complexa, ajuste manualmente o `day_of_month` com base no calendário oficial do tributo.
+
+Feriados podem ser cadastrados manualmente (Gerenciar → Feriados) ou importados automaticamente de **BrasilAPI** (`https://brasilapi.com.br/api/feriados/v1/{ano}`), um serviço público e gratuito mantido pela comunidade — não é do Supabase nem da Anthropic. Se ele ficar fora do ar, a importação automática falha mas o cadastro manual continua funcionando.
+
+## Comprovantes anexados (Supabase Storage)
+
+Bucket `comprovantes` (privado), criado pelo próprio `schema.sql` via `insert into storage.buckets`. Ao marcar uma obrigação como concluída, aparece um diálogo opcional (`ui/attachDialog.js`) para anexar o arquivo na hora — pular não afeta a conclusão, que já foi salva antes desse diálogo aparecer. O caminho do arquivo fica em `completions.attachment_path`; como o bucket é privado, a visualização usa um link assinado (`createSignedUrl`, válido por 1 hora), gerado sob demanda a partir de Gerenciar → Obrigações (botão "📎 Comprovante", quando existe).
+
+## Relatórios (taxa de cumprimento)
+
+Aba "Relatórios" (admin), calculada inteiramente no front-end a partir de `STATE.completions` — sem tabela nova. "No prazo" = a data de `done_at` é igual ou anterior à `occurrence_date` da conclusão. Mostra a taxa geral e quebrada por empresa e por responsável, considerando só os últimos 6 meses. Ficou restrito a admins de propósito: são dados de desempenho de pessoas específicas, e achamos mais apropriado isso não ficar visível para qualquer membro da equipe.
+
+## Alertas diários por e-mail
+
+Roda **fora do navegador**, via `scripts/enviar-alertas.mjs` (Node) agendado pelo GitHub Actions (`.github/workflows/alertas-diarios.yml`, gratuito). O script:
+
+1. Conecta no Supabase com a `service_role key` (que nunca aparece no front-end).
+2. Reaproveita as mesmas funções puras do painel (`getActiveOccurrence`, `statusOf` de `js/dateUtils.js`) para calcular o que está atrasado ou vencendo nos próximos N dias (padrão 5).
+3. Agrupa por `responsible_id` e manda um e-mail por pessoa via **Resend** (grátis até 3.000 e-mails/mês), mais um resumo geral para os admins.
+
+**Design deliberadamente simples**: é um lembrete diário — a mesma pendência aparece de novo todo dia até ser concluída, sem tabela de "já avisei isso" para deduplicar. Mais fácil de entender e depurar do que um sistema de dedup, e o custo de receber o mesmo lembrete de novo é baixo. Configuração completa (criar conta na Resend, configurar os Secrets no GitHub) no `SETUP.md`.
+
+> **Limitação honesta:** este script foi testado com a lógica de seleção de pendências e o envio de e-mail totalmente mockados (sem rede real) — ele roda corretamente e produz os e-mails esperados nesse ambiente controlado. Não foi possível testar contra uma conta real da Resend nem contra o seu projeto Supabase de produção, porque isso exigiria credenciais que não temos. Antes de confiar 100% nele, rode manualmente pela aba **Actions** do GitHub (`workflow_dispatch`) depois de configurar os Secrets, e confira se o e-mail chega.
+
 ## Papéis de acesso (RLS)
 
 Implementado inteiramente com recursos gratuitos do Supabase (Postgres RLS
@@ -168,6 +218,12 @@ política. Resumo:
 | Criar/editar/excluir obrigações         |  ✅   |   ❌   |
 | Criar/editar/excluir empresas           |  ✅   |   ❌   |
 | Alterar papel de acesso de alguém       |  ✅   |   ❌   |
+| Comentar numa obrigação                 |  ✅   |   ✅   |
+| Excluir comentário de **outra pessoa**  |  ✅   |   ❌   |
+| Ver trilha de auditoria                 |  ✅   |   ❌   |
+| Cadastrar/excluir feriados              |  ✅   |   ❌   |
+| Anexar comprovante a uma conclusão      |  ✅   |   ✅   |
+| Ver relatórios de cumprimento           |  ✅   |   ❌   |
 
 Importante: essas regras são aplicadas **no banco de dados** (RLS), não só
 escondendo botões na tela. Esconder o botão "Editar" para quem é membro é
@@ -248,6 +304,13 @@ credenciais de um projeto Supabase de teste (ou de desenvolvimento) e rode
 - O **primeiro** administrador de um projeto novo ainda exige rodar um
   `UPDATE` manual no SQL Editor (documentado no SETUP.md), porque até esse
   ponto não existe nenhum admin para usar a tela de Equipe.
+- O ajuste de "dia útil" é uma simplificação deliberada (empurra para
+  longe de fins de semana/feriados cadastrados), não um cálculo de
+  "Nº-ésimo dia útil do mês" — ver seção própria acima.
+- Os alertas por e-mail rodam fora do navegador e não foram testados
+  contra uma conta real de e-mail nem contra um projeto Supabase de
+  produção — só com rede mockada. Teste manualmente (`workflow_dispatch`
+  no GitHub Actions) antes de confiar neles no dia a dia.
 - Não há testes automatizados no repositório (a suíte de testes usada
   durante o desenvolvimento foi manual, com um mock do Supabase, e não faz
   parte da entrega). Se o projeto crescer, vale considerar algo simples
