@@ -183,6 +183,33 @@ opcional — ver SETUP.md.)
 celular ou no computador (como um aplicativo de verdade, com ícone
 próprio), direto pelo navegador — sem passar por loja de aplicativo nenhuma.
 
+## 11. Dia útil fiscal, checklist obrigatório e comprovante obrigatório
+
+> **Sobre os dados que já estão cadastrados:** de novo, nada foi apagado —
+> conferido explicitamente antes desta entrega, populando dados de teste e
+> reaplicando o script por cima.
+
+**Dia útil fiscal de verdade.** A versão anterior só evitava que um
+vencimento caísse num fim de semana ou feriado. Agora dá para marcar uma
+obrigação como "Nº-ésimo dia útil do mês" (ex.: 10º dia útil), que é como
+várias obrigações fiscais brasileiras realmente funcionam — o painel conta
+os dias úteis certinho, pulando fins de semana e os feriados cadastrados.
+
+**Checklist por obrigação.** Cada obrigação pode ter uma lista de passos
+cadastrada (ex.: "conferir base de cálculo", "gerar guia", "enviar
+comprovante ao contador"). Na hora de concluir, todo item precisa estar
+marcado — o botão "Concluir" só libera depois.
+
+**Comprovante agora é obrigatório.** Antes era um convite opcional depois
+de concluir; agora, concluir sem anexar o comprovante não é mais possível
+— nem pela tela, nem "por fora" direto no banco (adicionamos uma trava lá
+também, por segurança). Isso vale só para conclusões novas — nada do que
+já foi concluído sem comprovante antes dessa mudança foi afetado.
+
+**"Quem concluiu e quando" ficou visível.** Essa informação sempre existiu
+no banco, mas antes só aparecia escondida. Agora está direto no cartão de
+cada obrigação no painel, e também na lista de Gerenciar.
+
 ## O que continua exatamente igual
 
 - Visual do painel (cores, tipografia, layout dos cartões).

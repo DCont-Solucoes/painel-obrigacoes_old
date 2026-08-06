@@ -31,6 +31,7 @@ painel-obrigacoes/
 │   │   ├── companies.js      empresas
 │   │   ├── profiles.js       equipe (listar contas, alterar papel de acesso)
 │   │   ├── comments.js       comentários por obrigação
+│   │   ├── checklist.js      itens de checklist por obrigação
 │   │   ├── auditLog.js       trilha de auditoria (somente leitura)
 │   │   ├── holidays.js       feriados (cadastro manual + importação via BrasilAPI)
 │   │   └── storage.js        upload e link assinado dos comprovantes (Supabase Storage)
@@ -46,8 +47,8 @@ painel-obrigacoes/
 │       ├── manageHolidays.js     sub-aba Feriados
 │       ├── manageAudit.js        sub-aba Histórico (trilha de auditoria)
 │       ├── reports.js            aba Relatórios (taxa de cumprimento no prazo)
-│       ├── modal.js           formulário de nova/editar obrigação + comentários
-│       ├── attachDialog.js    diálogo opcional de anexar comprovante após concluir
+│       ├── modal.js           formulário de nova/editar obrigação + comentários + checklist
+│       ├── completeDialog.js  diálogo de conclusão: checklist + comprovante obrigatórios
 │       ├── toast.js           notificações não-bloqueantes (substitui alert())
 │       └── confirmDialog.js   diálogo de confirmação (substitui confirm())
 ├── scripts/
@@ -168,23 +169,36 @@ frequencia, dia, mes, meses, data, observacoes`. `categoria` e
 `trimestral`, `anual`, `pontual`) — o botão "Baixar modelo CSV" na própria
 tela gera um arquivo de exemplo já no formato certo.
 
-## Prioridade, comentários e histórico
+## Prioridade, checklist, comentários e histórico
 
 - **Prioridade** (`obligations.priority`): `baixa | media | alta | critica`, validada só na interface (dropdown fechado). Obrigações `alta`/`critica` ganham um selo vermelho no cartão, independente do status de prazo.
+- **Checklist** (`checklist_items`): lista de passos cadastrada pelo admin em cada obrigação (aparece dentro do modal de edição). O progresso de marcar/desmarcar cada item acontece **dentro do diálogo de conclusão** (`ui/completeDialog.js`) — não é salvo linha a linha no banco a cada ciclo. Isso é uma escolha deliberada: o checklist serve para garantir que a pessoa não esqueça uma etapa antes de concluir, não como um segundo histórico de auditoria por item (esse papel já é do `audit_log` e do comprovante anexado).
 - **Comentários** (`obligation_comments`): qualquer pessoa autenticada comenta; só o autor ou um admin exclui. Aparecem dentro do modal de edição da obrigação (só quando editando, não ao criar — precisa existir um `obligation_id`).
 - **Trilha de auditoria** (`audit_log`): populada automaticamente por gatilhos (`log_obligation_change()`) em todo INSERT/UPDATE/DELETE de `obligations`. Não existe política de escrita para o papel `authenticated` nessa tabela — só o gatilho grava (via `security definer`), e só admins conseguem consultar (aba Gerenciar → Histórico).
+- **Quem concluiu e quando**: sempre foi gravado (`completions.done_by_name`, `completions.done_at`), mas numa versão anterior não estava visível na tela. Agora aparece direto no cartão do painel (`.card-last-completion`) e na lista de Gerenciar → Obrigações.
 
-## Feriados e ajuste para dia útil
+## Feriados e dia útil fiscal
 
-Cada obrigação tem um campo opcional `adjust_business_day`. Quando ativo, `dateUtils.js → shiftToBusinessDay()` empurra a data calculada para a frente até cair num dia que não seja sábado, domingo, nem uma data presente na tabela `holidays`.
+Cada obrigação tem dois campos independentes relacionados a dia útil, que resolvem problemas diferentes:
 
-**Isso é uma simplificação deliberada.** Não implementamos "o Nº-ésimo dia útil do mês" (regra que várias obrigações fiscais brasileiras realmente usam, e que varia por tributo/UF/município) — calcular isso errado silenciosamente é pior do que não calcular. O que existe é mais simples e mais seguro: "não deixa o vencimento cair num fim de semana ou feriado cadastrado". Para obrigações com regra de dia útil mais complexa, ajuste manualmente o `day_of_month` com base no calendário oficial do tributo.
+- **`day_type = 'util_do_mes'`** — muda o *significado* de `day_of_month`: em vez de "todo dia 10", passa a ser **"o Nº-ésimo dia útil do mês"** (ex.: 10 = 10º dia útil), contando a partir do dia 1 e pulando fins de semana e os feriados cadastrados em `holidays`. Implementado em `dateUtils.js → nthBusinessDayOfMonth()`. Isso cobre o caso de uso fiscal real (EFD Contribuições, por exemplo, costuma vencer no "10º dia útil").
+- **`adjust_business_day`** — depois de calculada a data (fixa ou por dia útil), empurra para a frente se ainda assim cair num fim de semana/feriado (`shiftToBusinessDay()`). É um ajuste de segurança adicional, independente do `day_type`.
 
-Feriados podem ser cadastrados manualmente (Gerenciar → Feriados) ou importados automaticamente de **BrasilAPI** (`https://brasilapi.com.br/api/feriados/v1/{ano}`), um serviço público e gratuito mantido pela comunidade — não é do Supabase nem da Anthropic. Se ele ficar fora do ar, a importação automática falha mas o cadastro manual continua funcionando.
+Os dois podem ser usados juntos ou separados. Nenhum dos dois tenta adivinhar regras específicas de tributo/UF/município além de "pular fim de semana e feriado cadastrado" — para uma obrigação com regra de vencimento mais peculiar que isso, ajuste manualmente com base no calendário oficial do tributo.
 
-## Comprovantes anexados (Supabase Storage)
+Feriados podem ser cadastrados manualmente (Gerenciar → Feriados) ou importados automaticamente de **BrasilAPI** (`https://brasilapi.com.br/api/feriados/v1/{ano}`), um serviço público e gratuito mantido pela comunidade — não é do Supabase nem da Anthropic. Se ele ficar fora do ar, a importação automática falha mas o cadastro manual continua funcionando. **Importante:** BrasilAPI só cobre feriados **nacionais** — feriados estaduais e municipais (que afetam bastante obrigação municipal/ISS) precisam ser cadastrados manualmente.
 
-Bucket `comprovantes` (privado), criado pelo próprio `schema.sql` via `insert into storage.buckets`. Ao marcar uma obrigação como concluída, aparece um diálogo opcional (`ui/attachDialog.js`) para anexar o arquivo na hora — pular não afeta a conclusão, que já foi salva antes desse diálogo aparecer. O caminho do arquivo fica em `completions.attachment_path`; como o bucket é privado, a visualização usa um link assinado (`createSignedUrl`, válido por 1 hora), gerado sob demanda a partir de Gerenciar → Obrigações (botão "📎 Comprovante", quando existe).
+## Comprovante obrigatório (Supabase Storage)
+
+Bucket `comprovantes` (privado), criado pelo próprio `schema.sql` via `insert into storage.buckets`. **O comprovante é obrigatório desde esta versão** — marcar uma obrigação como concluída abre `ui/completeDialog.js`, que exige todos os itens do checklist marcados (se houver) **e** um arquivo anexado antes de habilitar o botão "Concluir". Cancelar o diálogo não grava nada — a conclusão só é criada depois que o upload do comprovante já deu certo, com `attachment_path` preenchido no mesmo INSERT (não é mais um passo separado como numa versão anterior).
+
+Essa obrigatoriedade é aplicada em **duas camadas**, não só na tela:
+1. A interface não deixa concluir sem os dois requisitos.
+2. O banco tem uma constraint (`completions_attachment_required`, `check (attachment_path is not null)`) que rejeita qualquer INSERT sem comprovante — mesmo que alguém tente burlar a interface chamando a API diretamente.
+
+A constraint foi adicionada com `NOT VALID` de propósito: isso faz a regra valer só para gravações **novas**, sem invalidar retroativamente conclusões antigas (registradas antes dessa mudança, sem comprovante) — elas continuam existindo normalmente no histórico.
+
+Como o bucket é privado, a visualização usa um link assinado (`createSignedUrl`, válido por 1 hora), gerado sob demanda a partir do cartão no painel ou de Gerenciar → Obrigações.
 
 ## Relatórios (taxa de cumprimento)
 
@@ -220,6 +234,7 @@ política. Resumo:
 | Alterar papel de acesso de alguém       |  ✅   |   ❌   |
 | Comentar numa obrigação                 |  ✅   |   ✅   |
 | Excluir comentário de **outra pessoa**  |  ✅   |   ❌   |
+| Cadastrar/excluir itens de checklist    |  ✅   |   ❌   |
 | Ver trilha de auditoria                 |  ✅   |   ❌   |
 | Cadastrar/excluir feriados              |  ✅   |   ❌   |
 | Anexar comprovante a uma conclusão      |  ✅   |   ✅   |
@@ -304,9 +319,20 @@ credenciais de um projeto Supabase de teste (ou de desenvolvimento) e rode
 - O **primeiro** administrador de um projeto novo ainda exige rodar um
   `UPDATE` manual no SQL Editor (documentado no SETUP.md), porque até esse
   ponto não existe nenhum admin para usar a tela de Equipe.
-- O ajuste de "dia útil" é uma simplificação deliberada (empurra para
-  longe de fins de semana/feriados cadastrados), não um cálculo de
-  "Nº-ésimo dia útil do mês" — ver seção própria acima.
+- O ajuste de "dia útil" combina duas regras: contar o Nº-ésimo dia útil
+  do mês (`day_type = 'util_do_mes'`) e empurrar para longe de fins de
+  semana/feriados cadastrados (`adjust_business_day`) — ver seção própria
+  acima. Nenhuma das duas cobre regras de vencimento mais específicas por
+  tributo/UF/município além disso.
+- O checklist de uma obrigação é um modelo reutilizado a cada ciclo — o
+  progresso de marcar/desmarcar item só existe durante o diálogo de
+  conclusão daquela vez, não fica salvo linha a linha no banco por
+  ocorrência. Se a pessoa fechar o navegador no meio do diálogo, perde o
+  que tinha marcado (mas nada é gravado incompleto — a conclusão só existe
+  se o diálogo for confirmado por inteiro).
+- Conclusões registradas **antes** da mudança que tornou o comprovante
+  obrigatório continuam existindo sem anexo — a regra nova não é
+  retroativa (ver a constraint `NOT VALID` na seção de comprovantes).
 - Os alertas por e-mail rodam fora do navegador e não foram testados
   contra uma conta real de e-mail nem contra um projeto Supabase de
   produção — só com rede mockada. Teste manualmente (`workflow_dispatch`

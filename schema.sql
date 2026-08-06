@@ -472,6 +472,77 @@ create policy "comprovantes_delete_own_or_admin"
 -- conclusão correspondente.
 alter table completions add column if not exists attachment_path text;
 
+-- Torna o comprovante OBRIGATÓRIO daqui em diante. Usamos "not valid" de
+-- propósito: isso aplica a regra só para gravações NOVAS a partir de agora
+-- — conclusões antigas (registradas antes dessa mudança, sem comprovante)
+-- continuam existindo normalmente, sem serem invalidadas retroativamente.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'completions_attachment_required'
+  ) then
+    alter table completions
+      add constraint completions_attachment_required
+      check (attachment_path is not null)
+      not valid;
+  end if;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- 10) DIA ÚTIL FISCAL (Nº-ésimo dia útil do mês)
+-- -----------------------------------------------------------------------------
+-- day_type = 'fixo'        → day_of_month é o dia corrido de sempre (ex.: dia 20).
+-- day_type = 'util_do_mes' → day_of_month passa a significar "o Nº-ésimo dia
+--                             útil do mês" (ex.: 3 = terceiro dia útil),
+--                             contando a partir do dia 1, pulando fins de
+--                             semana e os feriados cadastrados em `holidays`.
+alter table obligations add column if not exists day_type text not null default 'fixo';
+
+-- -----------------------------------------------------------------------------
+-- 11) CHECKLIST por obrigação
+-- -----------------------------------------------------------------------------
+-- Lista de passos (modelo) cadastrada pelo admin em cada obrigação. O
+-- progresso de marcar/desmarcar item é conduzido dentro do próprio diálogo
+-- de "concluir" (não fica salvo linha a linha no banco) — o checklist serve
+-- para garantir que a pessoa não esqueça uma etapa antes de concluir, não
+-- como um segundo histórico de auditoria por item.
+create table if not exists checklist_items (
+  id uuid primary key default gen_random_uuid(),
+  obligation_id uuid not null references obligations(id) on delete cascade,
+  description text not null,
+  position int not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists checklist_items_obligation_idx on checklist_items(obligation_id);
+
+alter table checklist_items enable row level security;
+
+drop policy if exists "checklist_items_select_authenticated" on checklist_items;
+create policy "checklist_items_select_authenticated"
+  on checklist_items for select
+  to authenticated
+  using (true);
+
+drop policy if exists "checklist_items_insert_admin" on checklist_items;
+create policy "checklist_items_insert_admin"
+  on checklist_items for insert
+  to authenticated
+  with check (is_admin(auth.uid()));
+
+drop policy if exists "checklist_items_update_admin" on checklist_items;
+create policy "checklist_items_update_admin"
+  on checklist_items for update
+  to authenticated
+  using (is_admin(auth.uid()))
+  with check (is_admin(auth.uid()));
+
+drop policy if exists "checklist_items_delete_admin" on checklist_items;
+create policy "checklist_items_delete_admin"
+  on checklist_items for delete
+  to authenticated
+  using (is_admin(auth.uid()));
+
 -- =============================================================================
 -- Fim do schema. Próximo passo: veja o SETUP.md para criar o primeiro admin
 -- e as contas da equipe.
