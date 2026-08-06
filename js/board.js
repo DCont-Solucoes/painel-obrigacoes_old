@@ -1,4 +1,4 @@
-import { STATE, isAdmin, completionsIndex, companyName, holidaysDateSet } from '../state.js';
+import { STATE, isAdmin, completionsIndex, companyName, holidaysDateSet, lastCompletion } from '../state.js';
 import { catInfo, FREQ_LABELS, priorityInfo } from '../constants.js';
 import {
   getActiveOccurrence, statusOf, fmtBR, deltaLabel, trackPercent, escapeHtml,
@@ -37,6 +37,11 @@ function renderCard(it) {
     + (active ? `<div class="ruler-due tone-${st.tone}" style="left:${pct}%"><span class="dot"></span></div>` : '')
     + '</div>';
 
+  const last = lastCompletion(ob.id);
+  const lastCompletionHtml = last
+    ? `<div class="card-last-completion">✓ Última conclusão: <strong>${escapeHtml(last.done_by_name)}</strong> em ${fmtBR(new Date(last.done_at))}${last.attachment_path ? ` · <button type="button" class="comment-delete" data-action="view-attachment" data-path="${escapeHtml(last.attachment_path)}">ver comprovante</button>` : ''}</div>`
+    : '';
+
   let actionsHtml = '<div class="card-actions">';
   if (active) {
     actionsHtml += `<button class="btn-sm done" data-action="done" data-id="${ob.id}">✓ Marcar concluído</button>`;
@@ -60,6 +65,7 @@ function renderCard(it) {
     + `<div class="card-meta"><span>🏢 ${escapeHtml(companyName(ob.company_id) || '—')}</span><span>· 👤 ${escapeHtml(ob.responsible || '—')}</span><span>· ${FREQ_LABELS[ob.frequency]}</span></div>`
     + trackHtml
     + `<div class="card-due-label"><span class="due-date">${dueLabel}</span><span class="due-delta tone-${st.tone}">${deltaTxt}</span></div>`
+    + lastCompletionHtml
     + actionsHtml
     + '</article>';
 }

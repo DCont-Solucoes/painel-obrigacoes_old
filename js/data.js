@@ -1,13 +1,14 @@
 import { STATE, isAdmin, holidaysDateSet } from './state.js';
 import { fetchObligations, createObligation, updateObligation, deleteObligation as apiDeleteObligation, createObligationsBulk } from './api/obligations.js';
-import { fetchCompletions, markCompletion, deleteCompletion, updateCompletionAttachment } from './api/completions.js';
+import { fetchCompletions, markCompletion, deleteCompletion } from './api/completions.js';
 import { fetchCompanies, ensureCompany, createCompany, updateCompany, deleteCompany as apiDeleteCompany } from './api/companies.js';
 import { fetchProfiles, updateProfile } from './api/profiles.js';
 import { fetchComments, createComment, deleteComment as apiDeleteComment } from './api/comments.js';
 import { fetchAuditLog } from './api/auditLog.js';
+import { fetchChecklistItems, createChecklistItem, deleteChecklistItem as apiDeleteChecklistItem } from './api/checklist.js';
 import { fetchHolidays, createHoliday, deleteHoliday as apiDeleteHoliday, fetchNationalHolidays } from './api/holidays.js';
 import { uploadAttachment } from './api/storage.js';
-import { attachDialog } from './ui/attachDialog.js';
+import { completeDialog } from './ui/completeDialog.js';
 import { getActiveOccurrence, fmtKey } from './dateUtils.js';
 import { showToast } from './ui/toast.js';
 import { confirmDialog } from './ui/confirmDialog.js';
@@ -60,16 +61,38 @@ export async function doMarkDone(obligationId, onDone) {
   const active = getActiveOccurrence(ob, completionsByObligation, holidaysDateSet());
   if (!active) return;
 
-  let created = null;
+  // Checklist (se houver) e comprovante são exigidos ANTES da conclusão
+  // ser gravada — se a pessoa cancelar o diálogo, nada é salvo.
+  let checklistItems = [];
   try {
-    created = await markCompletion({
+    checklistItems = await fetchChecklistItems(obligationId);
+  } catch (err) {
+    console.error('Falha ao carregar checklist, seguindo sem ele', err);
+  }
+
+  const result = await completeDialog(ob.name, checklistItems);
+  if (!result) return; // cancelado — nada foi salvo
+
+  const occurrenceDate = fmtKey(active);
+  let attachmentPath;
+  try {
+    attachmentPath = await uploadAttachment(result.file, obligationId, occurrenceDate);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível enviar o comprovante. A conclusão não foi salva — tente novamente.', 'error');
+    return;
+  }
+
+  try {
+    const created = await markCompletion({
       obligationId,
-      occurrenceDate: fmtKey(active),
+      occurrenceDate,
       userId: STATE.session.id,
       userLabel: STATE.profile?.display_name || STATE.session.email,
+      attachmentPath,
     });
     STATE.completions.push(created);
-    showToast('Obrigação marcada como concluída.', 'success');
+    showToast('Obrigação marcada como concluída, com comprovante anexado.', 'success');
   } catch (err) {
     console.error(err);
     if (err.code === '23505') {
@@ -80,24 +103,6 @@ export async function doMarkDone(obligationId, onDone) {
     }
   } finally {
     onDone?.();
-  }
-
-  // Comprovante é opcional e não bloqueia o fluxo principal — a conclusão
-  // já está salva antes mesmo dessa pergunta aparecer.
-  if (created) {
-    const file = await attachDialog(ob.name);
-    if (file) {
-      try {
-        const path = await uploadAttachment(file, obligationId, created.id);
-        const updated = await updateCompletionAttachment(created.id, path);
-        STATE.completions = STATE.completions.map((c) => (c.id === created.id ? updated : c));
-        showToast('Comprovante anexado.', 'success');
-      } catch (err) {
-        console.error(err);
-        showToast('A conclusão foi salva, mas não foi possível enviar o comprovante agora.', 'error');
-      }
-      onDone?.();
-    }
   }
 }
 
@@ -178,6 +183,7 @@ export async function doSaveObligation(id, formData, onDone) {
       notes: formData.notes,
       priority: formData.priority || 'media',
       adjust_business_day: !!formData.adjust_business_day,
+      day_type: formData.day_type || 'fixo',
     };
 
     let saved;
@@ -330,6 +336,40 @@ export async function doDeleteComment(commentId, onDone) {
   }
 }
 
+// ---------- checklist ----------
+
+export async function doLoadChecklist(obligationId) {
+  try {
+    return await fetchChecklistItems(obligationId);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível carregar o checklist agora.', 'error');
+    return [];
+  }
+}
+
+export async function doAddChecklistItem(obligationId, description, position, onDone) {
+  const trimmed = (description || '').trim();
+  if (!trimmed) return;
+  try {
+    const created = await createChecklistItem({ obligationId, description: trimmed, position });
+    onDone?.(created);
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível adicionar o item agora.', 'error');
+  }
+}
+
+export async function doDeleteChecklistItem(id, onDone) {
+  try {
+    await apiDeleteChecklistItem(id);
+    onDone?.();
+  } catch (err) {
+    console.error(err);
+    showToast('Não foi possível remover o item agora.', 'error');
+  }
+}
+
 // ---------- histórico / auditoria ----------
 
 export async function doLoadAuditLog(onDone) {
@@ -432,6 +472,7 @@ export async function doImportObligations(validRows, onDone) {
         responsible: profile ? profile.display_name : mapped.responsibleText,
         responsible_id: profile ? profile.id : null,
         frequency: mapped.frequency,
+        day_type: mapped.day_type || 'fixo',
         day_of_month: mapped.day_of_month,
         month: mapped.month,
         months: mapped.months,

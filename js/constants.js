@@ -15,6 +15,11 @@ export const FREQ_LABELS = {
 
 export const FREQUENCIES = ['mensal', 'trimestral', 'anual', 'pontual'];
 
+export const DAY_TYPES = [
+  { key: 'fixo', label: 'Dia fixo do mês' },
+  { key: 'util_do_mes', label: 'Nº-ésimo dia útil do mês' },
+];
+
 export const PRIORITIES = [
   { key: 'baixa', label: 'Baixa' },
   { key: 'media', label: 'Média' },

@@ -1,7 +1,7 @@
 import { STATE, companyName } from '../state.js';
-import { CATEGORIES, MONTH_NAMES, MONTH_FULL, PRIORITIES } from '../constants.js';
+import { CATEGORIES, MONTH_NAMES, MONTH_FULL, PRIORITIES, DAY_TYPES } from '../constants.js';
 import { escapeHtml } from '../dateUtils.js';
-import { doSaveObligation, doDeleteObligation, doLoadComments, doAddComment, doDeleteComment } from '../data.js';
+import { doSaveObligation, doDeleteObligation, doLoadComments, doAddComment, doDeleteComment, doLoadChecklist, doAddChecklistItem, doDeleteChecklistItem } from '../data.js';
 
 let onSavedCallback = null;
 
@@ -45,6 +45,7 @@ export function openModal(editId, { onSaved } = {}) {
     notes: '',
     priority: 'media',
     adjust_business_day: false,
+    day_type: 'fixo',
   };
   const empresaNomeAtual = existing ? companyName(existing.company_id) : (STATE.companies[0]?.name || '');
 
@@ -83,11 +84,14 @@ export function openModal(editId, { onSaved } = {}) {
   const priorityOptions = PRIORITIES.map((p) => `<option value="${p.key}" ${ob.priority === p.key ? 'selected' : ''}>${p.label}</option>`).join('');
   html += `<div class="field"><label>Prioridade</label><select id="fPriority">${priorityOptions}</select></div>`;
 
-  html += `<div class="field freq-mensal"><label>Dia do vencimento (mensal)</label><input id="fDayMensal" type="number" min="1" max="31" value="${ob.day_of_month || 10}" /></div>`;
-  html += `<div class="field freq-trimestral"><label>Dia do vencimento</label><input id="fDayTri" type="number" min="1" max="31" value="${ob.day_of_month || 10}" /></div>`;
+  const dayTypeOptions = DAY_TYPES.map((d) => `<option value="${d.key}" ${ob.day_type === d.key ? 'selected' : ''}>${d.label}</option>`).join('');
+  html += `<div class="field freq-day-type"><label>Como contar o dia do vencimento</label><select id="fDayType">${dayTypeOptions}</select></div>`;
+
+  html += `<div class="field freq-mensal"><label id="fDayMensalLabel">Dia do vencimento (mensal)</label><input id="fDayMensal" type="number" min="1" max="31" value="${ob.day_of_month || 10}" /></div>`;
+  html += `<div class="field freq-trimestral"><label id="fDayTriLabel">Dia do vencimento</label><input id="fDayTri" type="number" min="1" max="31" value="${ob.day_of_month || 10}" /></div>`;
   html += `<div class="field freq-trimestral"><label>Meses de vencimento</label><div class="months-grid" id="monthsGrid">${monthsChips}</div></div>`;
   html += `<div class="field freq-anual"><label>Mês</label><select id="fMonth">${monthFullOptions}</select></div>`;
-  html += `<div class="field freq-anual"><label>Dia</label><input id="fDayAnual" type="number" min="1" max="31" value="${ob.day_of_month || 10}" /></div>`;
+  html += `<div class="field freq-anual"><label id="fDayAnualLabel">Dia</label><input id="fDayAnual" type="number" min="1" max="31" value="${ob.day_of_month || 10}" /></div>`;
   html += `<div class="field freq-pontual"><label>Data</label><input id="fDate" type="date" value="${ob.due_date || ''}" /></div>`;
 
   html += `<div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="fAdjustBusinessDay" ${ob.adjust_business_day ? 'checked' : ''} style="width:auto;" /> Se cair num fim de semana ou feriado, empurrar para o próximo dia útil</label></div>`;
@@ -100,6 +104,14 @@ export function openModal(editId, { onSaved } = {}) {
       + '<div class="comment-add-row">'
         + '<input type="text" id="fNewComment" placeholder="Escrever um comentário…" />'
         + '<button type="button" class="btn-ghost" data-action="add-comment">Enviar</button>'
+      + '</div>'
+    + '</div>';
+
+    html += '<div class="field"><label>Checklist (passos para concluir)</label>'
+      + '<div id="checklistList" class="comments-list"><p class="comments-loading">Carregando…</p></div>'
+      + '<div class="comment-add-row">'
+        + '<input type="text" id="fNewChecklistItem" placeholder="Novo passo do checklist…" />'
+        + '<button type="button" class="btn-ghost" data-action="add-checklist-item">Adicionar</button>'
       + '</div>'
     + '</div>';
   }
@@ -116,6 +128,18 @@ export function openModal(editId, { onSaved } = {}) {
 
   const freqSel = document.getElementById('fFrequency');
   freqSel.addEventListener('change', () => toggleFreqFields(freqSel.value));
+
+  const dayTypeSel = document.getElementById('fDayType');
+  function updateDayLabels() {
+    const isUtil = dayTypeSel.value === 'util_do_mes';
+    const text = isUtil ? 'Qual dia útil (ex.: 3 = 3º dia útil)' : 'Dia do vencimento';
+    ['fDayMensalLabel', 'fDayTriLabel', 'fDayAnualLabel'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    });
+  }
+  dayTypeSel.addEventListener('change', updateDayLabels);
+  updateDayLabels();
 
   const respSel = document.getElementById('fResponsibleSelect');
   const respOther = document.getElementById('fResponsibleOther');
@@ -139,6 +163,7 @@ export function openModal(editId, { onSaved } = {}) {
       doDeleteObligation(id, () => onSavedCallback?.());
     });
     wireComments(existing.id);
+    wireChecklist(existing.id);
   }
   modalEl.querySelector('[data-action="save"]').addEventListener('click', () => handleSave(existing?.id || null));
 }
@@ -183,10 +208,49 @@ async function wireComments(obligationId) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 }
 
+function renderChecklistDisplayList(items) {
+  if (!items.length) return '<p class="comments-empty">Nenhum passo cadastrado ainda. Se ficar vazio, a conclusão não exige nenhum item marcado.</p>';
+  return items.map((it) => (
+    '<div class="comment-item">'
+      + `<div class="comment-body">${escapeHtml(it.description)} <button type="button" class="comment-delete" data-item-id="${it.id}">excluir</button></div>`
+    + '</div>'
+  )).join('');
+}
+
+async function wireChecklist(obligationId) {
+  const listEl = document.getElementById('checklistList');
+
+  async function reload() {
+    const items = await doLoadChecklist(obligationId);
+    if (!document.getElementById('checklistList')) return; // modal já fechou
+    listEl.innerHTML = renderChecklistDisplayList(items);
+    listEl.querySelectorAll('.comment-delete').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        doDeleteChecklistItem(btn.getAttribute('data-item-id'), reload);
+      });
+    });
+  }
+  reload();
+
+  const addBtn = document.querySelector('[data-action="add-checklist-item"]');
+  const input = document.getElementById('fNewChecklistItem');
+  async function submit() {
+    const description = input.value.trim();
+    if (!description) return;
+    addBtn.disabled = true;
+    const current = await doLoadChecklist(obligationId);
+    await doAddChecklistItem(obligationId, description, current.length, () => { input.value = ''; reload(); });
+    addBtn.disabled = false;
+  }
+  addBtn.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+}
+
 function toggleFreqFields(freq) {
   ['mensal', 'trimestral', 'anual', 'pontual'].forEach((f) => {
     document.querySelectorAll(`.freq-${f}`).forEach((el) => el.classList.toggle('hidden', f !== freq));
   });
+  document.querySelectorAll('.freq-day-type').forEach((el) => el.classList.toggle('hidden', freq === 'pontual'));
 }
 
 function readModalForm() {
@@ -214,6 +278,7 @@ function readModalForm() {
     name, category, empresaNome, responsible, responsible_id, frequency, notes,
     priority: document.getElementById('fPriority').value,
     adjust_business_day: document.getElementById('fAdjustBusinessDay').checked,
+    day_type: document.getElementById('fDayType')?.value || 'fixo',
     day_of_month: null, month: null, months: null, due_date: null,
   };
 

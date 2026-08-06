@@ -1,9 +1,9 @@
-import { CATEGORIES, FREQUENCIES } from './constants.js';
+import { CATEGORIES, FREQUENCIES, DAY_TYPES } from './constants.js';
 
 // Colunas esperadas no CSV (nomes em português, minúsculas, sem acento nos
 // cabeçalhos técnicos para evitar problemas de codificação em planilhas
 // exportadas de configurações regionais diferentes).
-export const CSV_COLUMNS = ['nome', 'categoria', 'empresa', 'responsavel', 'frequencia', 'dia', 'mes', 'meses', 'data', 'observacoes'];
+export const CSV_COLUMNS = ['nome', 'categoria', 'empresa', 'responsavel', 'frequencia', 'tipo_dia', 'dia', 'mes', 'meses', 'data', 'observacoes'];
 
 export function parseCsvFile(file) {
   return new Promise((resolve, reject) => {
@@ -36,6 +36,12 @@ function validateRow(raw, idx) {
   const frequency = (raw.frequencia || '').trim().toLowerCase();
   if (!FREQUENCIES.includes(frequency)) {
     errors.push(`"frequencia" inválida ("${raw.frequencia || ''}") — use: ${FREQUENCIES.join(', ')}`);
+  }
+
+  const dayTypeRaw = (raw.tipo_dia || '').trim().toLowerCase();
+  const dayType = dayTypeRaw || 'fixo';
+  if (!DAY_TYPES.some((d) => d.key === dayType)) {
+    errors.push(`"tipo_dia" inválido ("${raw.tipo_dia}") — use: ${DAY_TYPES.map((d) => d.key).join(', ')} (ou deixe em branco para "fixo")`);
   }
 
   let day_of_month = null;
@@ -86,7 +92,7 @@ function validateRow(raw, idx) {
     valid,
     errors,
     mapped: valid ? {
-      name, category, frequency, day_of_month, month, months, due_date, notes, empresaNome, responsibleText,
+      name, category, frequency, day_type: dayType, day_of_month, month, months, due_date, notes, empresaNome, responsibleText,
     } : null,
   };
 }
@@ -97,10 +103,11 @@ export function validateImportRows(rawRows) {
 
 export function buildCsvTemplate() {
   const rows = [
-    { nome: 'DCTFWeb', categoria: 'federal', empresa: 'GRA', responsavel: '', frequencia: 'mensal', dia: 30, mes: '', meses: '', data: '', observacoes: 'Consolida eSocial e EFD-Reinf' },
-    { nome: 'ECD', categoria: 'federal', empresa: 'GRA', responsavel: '', frequencia: 'anual', dia: 30, mes: 6, meses: '', data: '', observacoes: 'Prazo prorrogado pela IN RFB 2.142/2023' },
-    { nome: 'ICMS-ST (substituição tributária)', categoria: 'estadual', empresa: 'GRA', responsavel: '', frequencia: 'trimestral', dia: 20, mes: '', meses: '3;6;9;12', data: '', observacoes: 'Regra geral — confira exceções' },
-    { nome: 'Evento pontual de exemplo', categoria: 'municipal', empresa: 'GRA', responsavel: '', frequencia: 'pontual', dia: '', mes: '', meses: '', data: '2026-12-15', observacoes: 'Data única de exemplo' },
+    { nome: 'DCTFWeb', categoria: 'federal', empresa: 'GRA', responsavel: '', frequencia: 'mensal', tipo_dia: 'fixo', dia: 30, mes: '', meses: '', data: '', observacoes: 'Consolida eSocial e EFD-Reinf' },
+    { nome: 'ECD', categoria: 'federal', empresa: 'GRA', responsavel: '', frequencia: 'anual', tipo_dia: 'fixo', dia: 30, mes: 6, meses: '', data: '', observacoes: 'Prazo prorrogado pela IN RFB 2.142/2023' },
+    { nome: 'ICMS-ST (substituição tributária)', categoria: 'estadual', empresa: 'GRA', responsavel: '', frequencia: 'trimestral', tipo_dia: 'fixo', dia: 20, mes: '', meses: '3;6;9;12', data: '', observacoes: 'Regra geral — confira exceções' },
+    { nome: 'EFD Contribuições (10º dia útil)', categoria: 'federal', empresa: 'GRA', responsavel: '', frequencia: 'mensal', tipo_dia: 'util_do_mes', dia: 10, mes: '', meses: '', data: '', observacoes: 'Exemplo de dia útil fiscal: 10º dia útil do mês' },
+    { nome: 'Evento pontual de exemplo', categoria: 'municipal', empresa: 'GRA', responsavel: '', frequencia: 'pontual', tipo_dia: 'fixo', dia: '', mes: '', meses: '', data: '2026-12-15', observacoes: 'Data única de exemplo' },
   ];
   return window.Papa.unparse(rows, { columns: CSV_COLUMNS });
 }

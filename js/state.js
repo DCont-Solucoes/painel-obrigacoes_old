@@ -47,3 +47,10 @@ export function companyName(companyId) {
 export function holidaysDateSet() {
   return new Set(STATE.holidays.map((h) => h.holiday_date));
 }
+
+export function lastCompletion(obligationId) {
+  const mine = STATE.completions
+    .filter((c) => c.obligation_id === obligationId)
+    .sort((a, b) => b.occurrence_date.localeCompare(a.occurrence_date) || b.done_at.localeCompare(a.done_at));
+  return mine[0] || null;
+}

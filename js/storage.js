@@ -1,10 +1,12 @@
 import { supabase } from '../supabaseClient.js';
 
-// Caminho dentro do bucket: obligationId/completionId-nomeoriginal — assim
-// cada comprovante fica organizado por obrigação e não colide com outros.
-export async function uploadAttachment(file, obligationId, completionId) {
+// Caminho dentro do bucket: obligationId/occurrenceDate-timestamp-nome —
+// gerado ANTES de existir uma linha de conclusão, porque agora o
+// comprovante é obrigatório e precisa ser enviado antes da conclusão ser
+// gravada (não depois, como numa versão anterior).
+export async function uploadAttachment(file, obligationId, occurrenceDate) {
   const safeName = file.name.replace(/[^\w.\-]+/g, '_');
-  const path = `${obligationId}/${completionId}-${safeName}`;
+  const path = `${obligationId}/${occurrenceDate}-${Date.now()}-${safeName}`;
   const { error } = await supabase.storage.from('comprovantes').upload(path, file, { upsert: true });
   if (error) throw error;
   return path;
